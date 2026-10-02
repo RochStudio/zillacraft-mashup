@@ -90,8 +90,10 @@ pub const SPECIES: Species = Species {
     crush_budget: CRUSH_BUDGET,
     crush_hardness: CRUSH_HARDNESS,
     experience: XP as i32,
-    tail: TAIL,
-    stomp: STOMP,
+    // The mod's scales have no item here: diamonds and emeralds instead.
+    loot: &[("minecraft:diamond", 16, 32), ("minecraft:emerald", 16, 32)],
+    tail: Some(TAIL),
+    stomp: Some(STOMP),
     bite: None,
     roar_ticks: 0,
     tail_cooldown: TAIL_COOLDOWN,
@@ -104,8 +106,10 @@ pub const SPECIES: Species = Species {
     move_volume: 6.0,
     move_pitch: 1.0,
     voice_volume: 4.0,
+    voice_pitch: 1.0,
     // `BossEvent.BossBarColor.RED`.
     boss_color: [0.85, 0.12, 0.12],
+    ape: None,
 };
 
 /// The atomic breath: a 2.25 s charge while his plates light up, then almost 4 s of heat ray.

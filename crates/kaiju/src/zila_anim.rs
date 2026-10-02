@@ -107,7 +107,7 @@ impl ZilaRig {
             Move::Roar => self.roar(&mut p, s.move_time),
             Move::TailSwipe => self.tail_swipe(&mut p, s.move_time, s.move_direction),
             Move::Stomp => self.stomp(&mut p, s.move_time, s.move_direction),
-            Move::None => {}
+            _ => {}
         }
         p
     }

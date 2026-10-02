@@ -1,6 +1,7 @@
-//! ZillaCraft's kaiju: Godzilla's and Zilla's models (converted from the mod's geometry) posed
-//! by the ported animations, Godzilla's dorsal plates' blue glow and the atomic breath's beam
-//! while he breathes, and the red warnings on the ground before a move.
+//! ZillaCraft's kaiju: Godzilla's, Zilla's, Kong's and King Kong's models (converted from the
+//! mod's geometry) posed by the ported animations, Godzilla's dorsal plates' blue glow and the
+//! atomic breath's beam while he breathes, an enraged ape's glowing eyes and the boulders it
+//! throws, and the red warnings on the ground before a move.
 
 use crate::cow_render::entity_shade;
 use crate::kaiju_server::KaijuView;
@@ -9,7 +10,8 @@ use crate::mesh::{Atlas, ChunkMesh, Vertex};
 use crate::pack::ResourceId;
 use glam::Vec3;
 use kaiju::anim::{AnimState, Rig, model_scale};
-use kaiju::model::{Mat34, Model, Quad, entity_transform};
+use kaiju::ape_anim::ApeRig;
+use kaiju::model::{Mat34, Model, PartPose, Quad, entity_transform};
 use kaiju::zila_anim::ZilaRig;
 use std::sync::OnceLock;
 
@@ -41,6 +43,42 @@ fn zilla() -> Option<&'static Loaded<ZilaRig>> {
             Some(Loaded { model, rig, scale })
         })
         .as_ref()
+}
+
+/// An ape: Kong's head a little oversized, as it reads better at a distance (`KongRenderer`).
+fn ape(species: &'static kaiju::Species) -> Option<&'static Loaded<ApeRig>> {
+    static KONG: OnceLock<Option<Loaded<ApeRig>>> = OnceLock::new();
+    static KING_KONG: OnceLock<Option<Loaded<ApeRig>>> = OnceLock::new();
+    let king = species.id == kaiju::kong::KING_KONG.id;
+    let (loaded, json, head_scale) = if king { (&KING_KONG, kaiju::KING_KONG_MODEL, 1.0) } else { (&KONG, kaiju::KONG_MODEL, 1.15) };
+    loaded
+        .get_or_init(|| {
+            let model = Model::parse(json).ok()?;
+            let rig = ApeRig::new(&model, species, head_scale).ok()?;
+            let scale = model_scale(&model, species.height);
+            Some(Loaded { model, rig, scale })
+        })
+        .as_ref()
+}
+
+fn boulder() -> Option<&'static Model> {
+    static MODEL: OnceLock<Option<Model>> = OnceLock::new();
+    MODEL.get_or_init(|| Model::parse(kaiju::BOULDER_MODEL).ok()).as_ref()
+}
+
+/// A kaiju's model posed for this frame: the model, its pose, its scale, its skin, and an
+/// ape's glowing eyes.
+fn posed(v: &KaijuView, state: &AnimState) -> Option<(&'static Model, Vec<PartPose>, f32, &'static str, Option<&'static str>)> {
+    let species = v.species;
+    if species.id == kaiju::godzilla::SPECIES.id {
+        godzilla().map(|l| (&l.model, l.rig.pose(&l.model, state, false), l.scale, kaiju::pack::SKIN, None))
+    } else if species.ape.is_some() {
+        let king = species.id == kaiju::kong::KING_KONG.id;
+        let (skin, eyes) = if king { (kaiju::pack::KING_KONG_SKIN, kaiju::pack::KING_KONG_EYES) } else { (kaiju::pack::KONG_SKIN, kaiju::pack::KONG_EYES) };
+        ape(species).map(|l| (&l.model, l.rig.pose(&l.model, state), l.scale, skin, Some(eyes)))
+    } else {
+        zilla().map(|l| (&l.model, l.rig.pose(&l.model, state), l.scale, kaiju::pack::ZILA_SKIN, None))
+    }
 }
 
 fn region(atlas: &Atlas, id: &str) -> Option<[f32; 4]> {
@@ -88,8 +126,9 @@ pub fn blend(previous: &[KaijuView], current: &[KaijuView], t: f32) -> Vec<Kaiju
     current.iter().map(|v| shown(previous.iter().find(|p| p.id == v.id).unwrap_or(v), v, t)).collect()
 }
 
-/// Appends every kaiju, `partial` of a tick from `previous` to `views`: the skin to `models`,
-/// Godzilla's glow and beam and every kaiju's warnings to `translucent`.
+/// Appends every kaiju, `partial` of a tick from `previous` to `views`: the skin, an enraged
+/// ape's eyes and its boulders to `models`, Godzilla's glow and beam and every kaiju's warnings
+/// to `translucent`.
 #[allow(clippy::too_many_arguments)]
 pub fn append_kaiju(
     models: &mut ChunkMesh,
@@ -103,9 +142,11 @@ pub fn append_kaiju(
 ) {
     let glow = region(atlas, kaiju::pack::GLOW);
     let beam = region(atlas, kaiju::pack::BEAM);
+    let rock = region(atlas, kaiju::pack::BOULDER);
     let t = partial.clamp(0.0, 1.0);
     for v in views {
-        let s = shown(previous.iter().find(|q| q.id == v.id).unwrap_or(v), v, t);
+        let before = previous.iter().find(|q| q.id == v.id);
+        let s = shown(before.unwrap_or(v), v, t);
         let (feet, yaw) = (s.feet, s.yaw);
         let breathing = v.breath_ticks > 0;
         let state = AnimState {
@@ -120,13 +161,15 @@ pub fn append_kaiju(
             move_time: v.move_ticks as f32 + t,
             move_direction: v.move_direction,
         };
+        // An ape's boulders fly on whatever becomes of it.
+        if let (Some(rock), Some(model)) = (rock, boulder()) {
+            for b in &v.boulders {
+                let was = before.and_then(|p| p.boulders.iter().find(|q| q.id == b.id));
+                append_boulder(models, translucent, model, b, was, rock, beam, light, t);
+            }
+        }
         let is_godzilla = v.species.id == kaiju::godzilla::SPECIES.id;
-        let posed = if is_godzilla {
-            godzilla().map(|l| (&l.model, l.rig.pose(&l.model, &state, false), l.scale, kaiju::pack::SKIN))
-        } else {
-            zilla().map(|l| (&l.model, l.rig.pose(&l.model, &state), l.scale, kaiju::pack::ZILA_SKIN))
-        };
-        let Some((model, pose, scale, skin)) = posed else { continue };
+        let Some((model, pose, scale, skin, eyes)) = posed(v, &state) else { continue };
         let Some(skin) = region(atlas, skin) else { continue };
         // It keels over as it dies, as every mob does (`setupRotations`: 90 degrees over a second).
         let dying = if v.death_ticks > 0 { ((v.death_ticks as f32 + t - 1.0) / 20.0 * 1.6).sqrt().min(1.0) } else { 0.0 };
@@ -145,6 +188,10 @@ pub fn append_kaiju(
         let mut quads: Vec<Quad> = Vec::new();
         model.mesh(&pose, &transform, &mut quads);
         push_quads(models, &quads, feet, skin, tint, 1.0, sky, block, true);
+        // Enraged, its eyes glow, even in the dark (`KongEyesLayer`).
+        if let Some(eyes) = eyes.filter(|_| v.enraged && v.death_ticks == 0).and_then(|id| region(atlas, id)) {
+            push_quads(models, &quads, feet, eyes, [1.0; 3], 1.0, 15.0, 15.0, false);
+        }
 
         if breathing && v.death_ticks == 0 && is_godzilla {
             if let (Some(glow), Some(l)) = (glow, godzilla()) {
@@ -168,15 +215,50 @@ pub fn append_kaiju(
             for at in &v.warnings {
                 push_ground_mark(translucent, beam, *at, 1.2, [1.0, 0.25, 0.1]);
             }
-            if let Some((at, radius)) = v.shockwave {
-                let n = 48;
-                for i in 0..n {
-                    let a = std::f64::consts::TAU * i as f64 / n as f64;
-                    let p = [at[0] + a.cos() * radius, at[1] + 0.2, at[2] + a.sin() * radius];
-                    push_ground_mark(translucent, beam, p, 2.0, [0.85, 0.75, 0.55]);
-                }
+            for at in &v.shockwave {
+                push_ground_mark(translucent, beam, [at[0], at[1] + 0.1, at[2]], 2.0, [0.85, 0.75, 0.55]);
             }
         }
+    }
+}
+
+/// A thrown boulder (`KongBoulderRenderer`), tumbling as it flies, and the red ring round where
+/// it will land.
+#[allow(clippy::too_many_arguments)]
+fn append_boulder(
+    models: &mut ChunkMesh,
+    translucent: &mut ChunkMesh,
+    model: &Model,
+    b: &kaiju::ape::Boulder,
+    was: Option<&kaiju::ape::Boulder>,
+    rock: [f32; 4],
+    beam: Option<[f32; 4]>,
+    light: &SkyLight,
+    t: f32,
+) {
+    let from = was.map_or(b.at, |w| w.at);
+    let at: [f64; 3] = std::array::from_fn(|i| from[i] + (b.at[i] - from[i]) * f64::from(t));
+    let centre = [at[0], at[1] + b.size() / 2.0, at[2]];
+    let age = b.life as f32 + t;
+    // Its model is a 16-pixel rock, drawn 7.8 times its box at the design size.
+    let size = 7.8 * b.scale as f32;
+    let transform = Mat34::rotation_zyx(0.0, 0.0, (age * 17.0).to_radians())
+        .mul(&Mat34::rotation_y((age * 6.0).to_radians()))
+        .mul(&Mat34::scale(size, size, size));
+    let mut quads = Vec::new();
+    model.mesh(&model.rest_pose(), &transform, &mut quads);
+    let probe = (centre[0].floor() as i32, centre[1].floor() as i32, centre[2].floor() as i32);
+    let (sky, block) = (f32::from(light.get(probe)), f32::from(light.get_block(probe)));
+    push_quads(models, &quads, centre, rock, [1.0; 3], 1.0, sky, block, true);
+    if let Some(beam) = beam {
+        let radius = b.blast_radius();
+        let points = (28.0 * b.scale) as usize;
+        for i in 0..points {
+            let a = std::f64::consts::TAU * i as f64 / points as f64;
+            let p = [b.landing[0] + a.cos() * radius, b.landing[1], b.landing[2] + a.sin() * radius];
+            push_ground_mark(translucent, beam, p, 1.2, [1.0, 0.25, 0.1]);
+        }
+        push_ground_mark(translucent, beam, b.landing, 1.2 * b.scale as f32, [1.0, 0.25, 0.1]);
     }
 }
 
@@ -272,9 +354,11 @@ mod tests {
             max_health: species.max_health,
             death_ticks: 0,
             hurt_ticks: 0,
+            enraged: false,
+            boulders: Vec::new(),
             beam: None,
             charge: None,
-            shockwave: None,
+            shockwave: Vec::new(),
             warnings: Vec::new(),
         }
     }
@@ -308,6 +392,12 @@ mod tests {
             let pose = zilla.rig.pose(&zilla.model, &AnimState::default());
             let share = uncovered(&kaiju::zila::SPECIES, &zilla.model, &pose, yaw);
             assert!(share < 0.02, "Zilla facing {yaw}: {:.1}% of its model is outside its hitboxes", share * 100.0);
+            for species in [&kaiju::kong::KONG, &kaiju::kong::KING_KONG] {
+                let ape = ape(species).unwrap();
+                let pose = ape.rig.pose(&ape.model, &AnimState::default());
+                let share = uncovered(species, &ape.model, &pose, yaw);
+                assert!(share < 0.02, "{} facing {yaw}: {:.1}% of his model is outside his hitboxes", species.name, share * 100.0);
+            }
         }
     }
 }

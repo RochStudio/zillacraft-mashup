@@ -1,12 +1,15 @@
-//! ZillaCraft's kaiju on the server (Godzilla and Zilla): each one's brain (the `kaiju` crate)
-//! driving a body that walks the level the way a Minecraft mob does, crushing what it wades
-//! through, Godzilla blasting the ground with his atomic breath, and hitting players through
-//! the same path as any mob.
+//! ZillaCraft's kaiju on the server (Godzilla, Zilla, Kong and King Kong): each one's brain (the
+//! `kaiju` crate) driving a body that walks the level the way a Minecraft mob does, crushing what
+//! it wades through, Godzilla blasting the ground with his atomic breath, and hitting players
+//! through the same path as any mob. The apes walk their own way: through everything, over the
+//! ground, throwing boulders.
 
 use kaiju::Species;
 use kaiju::anim::Move;
+use kaiju::ape;
 use kaiju::brain::{Arena, Body, Brain, Cause, Effect, Seen, Walk};
 use minecraftoss_core::BlockPos;
+use minecraftoss_core::tags::TagId;
 use minecraftoss_entities::world::{MobSound, PlayerHit, PlayerHitKind};
 use minecraftoss_world::level::explosion::{BlockInteraction, Explosion};
 use minecraftoss_world::level::{update, Level};
@@ -54,9 +57,14 @@ pub struct KaijuView {
     pub max_health: f32,
     pub death_ticks: u32,
     pub hurt_ticks: u32,
+    /// An ape below half health: glowing eyes, a red boss bar.
+    pub enraged: bool,
+    /// Boulders an ape has thrown, still in the air.
+    pub boulders: Vec<ape::Boulder>,
     pub beam: Option<([f64; 3], [f64; 3])>,
     pub charge: Option<([f64; 3], f32)>,
-    pub shockwave: Option<([f64; 3], f64)>,
+    /// A shockwave's ring this tick, on the ground.
+    pub shockwave: Vec<[f64; 3]>,
     pub warnings: Vec<[f64; 3]>,
 }
 
@@ -74,6 +82,8 @@ struct Kaiju {
     /// A hit is waiting for his hurt sound, and ticks until another may have one.
     hurt_sound: bool,
     hurt_sound_ticks: u32,
+    /// How far an ape has walked since its last heavy footstep, and which foot that was.
+    stride: f64,
     shown: Shown,
 }
 
@@ -83,7 +93,7 @@ struct Kaiju {
 struct Shown {
     beam: Option<([f64; 3], [f64; 3])>,
     charge: Option<([f64; 3], f32)>,
-    shockwave: Option<([f64; 3], f64)>,
+    shockwave: Vec<[f64; 3]>,
     warnings: Vec<[f64; 3]>,
 }
 
@@ -142,6 +152,7 @@ impl KaijuWorld {
             hurt_ticks: 0,
             hurt_sound: false,
             hurt_sound_ticks: 0,
+            stride: 0.0,
             shown: Shown::default(),
         });
         id
@@ -168,6 +179,7 @@ impl KaijuWorld {
         let soaked = (armor / 5.0).max(armor - damage / (2.0 + toughness / 4.0)).min(20.0);
         k.health -= damage * (1.0 - soaked / 25.0);
         k.hurt_ticks = 10;
+        k.brain.wounded(k.health / k.brain.species.max_health);
         // Its hurt sound at most every half second, as vanilla's hurt cooldown allows one.
         if k.hurt_sound_ticks == 0 {
             k.hurt_sound = true;
@@ -197,9 +209,11 @@ impl KaijuWorld {
                 max_health: k.brain.species.max_health,
                 death_ticks: k.death_ticks,
                 hurt_ticks: k.hurt_ticks,
+                enraged: k.brain.enraged(),
+                boulders: k.brain.boulders.clone(),
                 beam: k.shown.beam,
                 charge: k.shown.charge,
-                shockwave: k.shown.shockwave,
+                shockwave: k.shown.shockwave.clone(),
                 warnings: k.shown.warnings.clone(),
             })
             .collect()
@@ -210,13 +224,13 @@ impl KaijuWorld {
         let mut out = Vec::new();
         for v in views.iter().filter(|v| v.health > 0.0) {
             let s = v.species;
-            let tail_angle = match v.movement {
-                Move::TailSwipe => s.tail.angle(f64::from(v.move_ticks), v.move_direction),
+            let tail_angle = match (v.movement, s.tail) {
+                (Move::TailSwipe, Some(tail)) => tail.angle(f64::from(v.move_ticks), v.move_direction),
                 _ => 0.0,
             };
             let half = s.width / 2.0;
             out.push((v.id, [v.feet[0] - half, v.feet[1], v.feet[2] - half, v.feet[0] + half, v.feet[1] + s.column_height, v.feet[2] + half]));
-            for b in kaiju::hitboxes::world_boxes(s.hitboxes, v.feet, v.yaw, &s.tail, tail_angle) {
+            for b in kaiju::hitboxes::world_boxes(s.hitboxes, v.feet, v.yaw, s.tail.as_ref(), tail_angle) {
                 out.push((v.id, [b.min[0], b.min[1], b.min[2], b.max[0], b.max[1], b.max[2]]));
             }
         }
@@ -263,6 +277,7 @@ impl KaijuWorld {
         // Where players are respawning: followed through their grace, as their spawn moves
         // them onto the Minecraft spawn.
         let respawning: Vec<[f64; 3]> = players.iter().filter(|p| p.alive && grace.contains_key(&p.id)).map(|p| p.feet).collect();
+        let logs = level.registries().block_tags.id("minecraft:logs");
         for k in &mut self.list {
             // Its target fell, or a player is respawning by it: it walks off, rather than wait
             // where they respawn.
@@ -287,12 +302,21 @@ impl KaijuWorld {
             k.hurt_ticks = k.hurt_ticks.saturating_sub(1);
             k.hurt_sound_ticks = k.hurt_sound_ticks.saturating_sub(1);
             if std::mem::take(&mut k.hurt_sound) && k.health > 0.0 {
-                let pitch = k.brain.voice_pitch();
+                let pitch = k.brain.voice_pitch() * species.voice_pitch;
                 out.sounds.push(sound(species.voice, "hurt", k.body.feet, species.voice_volume * 1.25, pitch));
+            }
+            // An ape's boulders fly on whatever becomes of it.
+            if !k.brain.boulders.is_empty() {
+                let arena = LevelArena { level, logs };
+                let mut effects = Vec::new();
+                k.brain.tick_boulders(&seen, &arena, &mut effects);
+                for effect in effects {
+                    apply(k, effect, level, griefing, &mut out, &seen);
+                }
             }
             if k.health <= 0.0 {
                 if k.death_ticks == 0 {
-                    out.sounds.push(sound(species.voice, "death", k.body.feet, species.voice_volume * 1.5, 1.0));
+                    out.sounds.push(sound(species.voice, "death", k.body.feet, species.voice_volume * 1.5, species.voice_pitch));
                 }
                 k.death_ticks += 1;
                 if k.death_ticks == DEATH_TICKS {
@@ -301,23 +325,22 @@ impl KaijuWorld {
                 k.shown = Shown::default();
                 continue;
             }
-            let seen: Vec<Seen> = seen
-                .iter()
-                .map(|s| Seen { visible: has_line_of_sight(level, eye_of(&k.body, species), s.eyes()), ..*s })
-                .collect();
+            let arena = LevelArena { level, logs };
+            let seen: Vec<Seen> = seen.iter().map(|s| Seen { visible: arena.sees(&k.body, species, s.eyes()), ..*s }).collect();
             let mut walk = None;
             let mut effects = Vec::new();
-            {
-                let arena = LevelArena { level };
-                k.brain.tick(&mut k.body, &seen, &arena, &mut walk, &mut effects);
+            k.brain.tick(&mut k.body, &seen, &arena, &mut walk, &mut effects);
+            if species.ape.is_some() {
+                Self::step_ape(k, &arena, walk, &mut out);
+            } else {
+                Self::step(k, level, walk);
             }
-            Self::step(k, level, walk);
             k.shown = Shown::default();
             for effect in effects {
                 apply(k, effect, level, griefing, &mut out, &seen);
             }
             if k.brain.movement == Move::None && k.brain.breath_ticks == 0 && k.brain.chance(240) {
-                let pitch = k.brain.voice_pitch();
+                let pitch = k.brain.voice_pitch() * species.voice_pitch;
                 out.sounds.push(sound(species.voice, "ambient", k.body.feet, species.voice_volume, pitch));
             }
         }
@@ -408,6 +431,50 @@ impl KaijuWorld {
         k.walk_speed += ((moved * 4.0).min(1.0) - k.walk_speed) * 0.4;
         k.walk_position += k.walk_speed;
     }
+
+    /// Walks an ape a tick (`Kong.strideTowards` and `followTerrain`): it turns towards where it
+    /// is going a few degrees a tick, slowing while it turns, and wades through whatever is in
+    /// the way, rising onto higher ground and dropping to lower at a limited rate. Mid-leap, its
+    /// brain flies it. A heavy footfall every few strides.
+    fn step_ape(k: &mut Kaiju, arena: &LevelArena, walk: Option<Walk>, out: &mut KaijuTick) {
+        let species = k.brain.species;
+        let Some(ape) = species.ape else { return };
+        let before = k.body.feet;
+        if let Some(walk) = walk {
+            k.brain.turn_towards(&mut k.body, walk.to);
+            let wanted = (walk.to[1] - k.body.feet[2]).atan2(walk.to[0] - k.body.feet[0]).to_degrees() - 90.0;
+            let alignment = (wanted - f64::from(k.body.yaw)).to_radians().cos().max(0.0);
+            let yaw = f64::from(k.body.yaw).to_radians();
+            let speed = species.speed * walk.speed * alignment;
+            k.body.feet[0] -= yaw.sin() * speed;
+            k.body.feet[2] += yaw.cos() * speed;
+        }
+        if !k.brain.airborne() {
+            let y = k.body.feet[1];
+            let ground = kaiju::brain::ground_under(arena, species, k.body.feet[0], k.body.feet[2], y);
+            k.body.feet[1] = match ground {
+                Some(top) if top > y => top.min(y + ape.s(ape::CLIMB_PER_TICK)),
+                Some(top) => top.max(y - ape.s(ape::DROP_PER_TICK)),
+                None => (y - ape.s(ape::DROP_PER_TICK)).max(f64::from(arena.level.min_y())),
+            };
+            k.on_ground = ground.is_some_and(|top| (k.body.feet[1] - top).abs() < 1e-3);
+        } else {
+            k.on_ground = false;
+        }
+        // `LivingEntity.calculateEntityAnimation`: the distance moved drives the stride.
+        let moved = (k.body.feet[0] - before[0]).hypot(k.body.feet[2] - before[2]);
+        k.body.moving = moved > 0.01;
+        k.walk_speed += ((moved as f32 * 4.0).min(1.0) - k.walk_speed) * 0.4;
+        k.walk_position += k.walk_speed;
+        if k.on_ground {
+            k.stride += moved;
+            if k.stride >= ape.s(ape::STRIDE_LENGTH) {
+                k.stride = 0.0;
+                let pitch = 0.675 * k.brain.voice_pitch() * species.move_pitch;
+                out.sounds.push(sound(species.voice, "step", k.body.feet, 3.0 * ape.scale as f32, pitch));
+            }
+        }
+    }
 }
 
 fn apply(k: &mut Kaiju, effect: Effect, level: &mut Level<'static>, griefing: bool, out: &mut KaijuTick, seen: &[Seen]) {
@@ -446,7 +513,19 @@ fn apply(k: &mut Kaiju, effect: Effect, level: &mut Level<'static>, griefing: bo
         Effect::Warning { at } => k.shown.warnings.push(at),
         Effect::Beam { from, to } => k.shown.beam = Some((from, to)),
         Effect::Charge { at, strength } => k.shown.charge = Some((at, strength)),
-        Effect::Shockwave { at, radius } => k.shown.shockwave = Some((at, radius)),
+        Effect::Shockwave { at, radius } => {
+            // Its ring rolls along the ground (`Kong.shockwaveRing`), not through the air at the
+            // height it started from.
+            let arena = LevelArena { level, logs: level.registries().block_tags.id("minecraft:logs") };
+            let points = ((radius * 2.5) as u32).clamp(16, 120);
+            k.shown.shockwave = (0..points)
+                .map(|i| {
+                    let angle = std::f64::consts::TAU * f64::from(i) / f64::from(points);
+                    let (x, z) = (at[0] + angle.cos() * radius, at[2] + angle.sin() * radius);
+                    [x, arena.ground_at(x, z, at[1], 6, 12).unwrap_or(at[1]), z]
+                })
+                .collect();
+        }
     }
 }
 
@@ -528,18 +607,14 @@ fn eye_of(body: &Body, species: &Species) -> [f64; 3] {
     [body.feet[0], body.feet[1] + species.eye_height, body.feet[2]]
 }
 
-/// Kaiju see through foliage, not walls (the mod's rule): leaves don't block sight.
-fn has_line_of_sight(level: &Level<'static>, from: [f64; 3], to: [f64; 3]) -> bool {
-    first_solid(level, from, to, true).is_none()
-}
-
 fn leaves(level: &Level<'static>, pos: BlockPos) -> bool {
     let blocks = &level.registries().blocks;
     blocks.block(blocks.state(level.block(pos)).block).is_a("LeavesBlock")
 }
 
-/// The first solid block a line passes through (a voxel walk), as the point where it enters.
-fn first_solid(level: &Level<'static>, from: [f64; 3], to: [f64; 3], through_leaves: bool) -> Option<[f64; 3]> {
+/// The first solid block a line passes through (a voxel walk), as the point where it enters,
+/// passing through whatever `see_through` says.
+fn first_solid(level: &Level<'static>, from: [f64; 3], to: [f64; 3], see_through: impl Fn(BlockPos) -> bool) -> Option<[f64; 3]> {
     let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
     if length < 1e-9 {
@@ -556,7 +631,7 @@ fn first_solid(level: &Level<'static>, from: [f64; 3], to: [f64; 3], through_lea
         }
         last = cell;
         let pos = BlockPos::new(cell[0], cell[1], cell[2]);
-        if solid(level, pos) && !(through_leaves && leaves(level, pos)) {
+        if solid(level, pos) && !see_through(pos) {
             return Some(p);
         }
     }
@@ -565,16 +640,63 @@ fn first_solid(level: &Level<'static>, from: [f64; 3], to: [f64; 3], through_lea
 
 struct LevelArena<'a> {
     level: &'a Level<'static>,
+    /// `#minecraft:logs`, which the apes see and wade through.
+    logs: Option<TagId>,
+}
+
+impl LevelArena<'_> {
+    /// Trees and foliage, to an ape (`KongTerrain.isFoliage`): logs, leaves and bamboo.
+    fn foliage(&self, pos: BlockPos) -> bool {
+        let state = self.level.block(pos);
+        let registries = self.level.registries();
+        let blocks = &registries.blocks;
+        let block = blocks.block(blocks.state(state).block);
+        block.is_a("LeavesBlock") || block.is_a("BambooStalkBlock") || self.logs.is_some_and(|logs| registries.block_in_tag(state, logs))
+    }
+
+    /// Whether a kaiju sees `to`: through foliage but not walls (the mod's rule). Leaves don't
+    /// block a kaiju's sight; nor do tree trunks or bamboo an ape's, out to its sight's range.
+    fn sees(&self, body: &Body, species: &Species, to: [f64; 3]) -> bool {
+        let from = eye_of(body, species);
+        match species.ape {
+            Some(ape) => {
+                let far = ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2) + (to[2] - from[2]).powi(2)).sqrt();
+                far <= ape.s(ape::SIGHT) && self.clip_ground(from, to).is_none()
+            }
+            None => first_solid(self.level, from, to, |pos| leaves(self.level, pos)).is_none(),
+        }
+    }
 }
 
 impl Arena for LevelArena<'_> {
     fn clip_blocks(&self, from: [f64; 3], to: [f64; 3]) -> Option<[f64; 3]> {
-        first_solid(self.level, from, to, false)
+        first_solid(self.level, from, to, |_| false)
     }
 
     fn surface_y(&self, x: f64, z: f64, near_y: f64) -> f64 {
         // Warnings are drawn on the ground a few blocks above or below the kaiju's feet.
         ground_top(self.level, x, z, near_y.floor() as i32, 6).map_or(near_y, f64::from)
+    }
+
+    fn clip_ground(&self, from: [f64; 3], to: [f64; 3]) -> Option<[f64; 3]> {
+        first_solid(self.level, from, to, |pos| self.foliage(pos))
+    }
+
+    /// `KongTerrain.surfaceAt`: the top of the highest block with a collision shape that isn't foliage.
+    fn ground_at(&self, x: f64, z: f64, near_y: f64, above: i32, below: i32) -> Option<f64> {
+        let (bx, bz) = (x.floor() as i32, z.floor() as i32);
+        let top = near_y.floor() as i32 + above;
+        let bottom = (near_y.floor() as i32 - below).max(self.level.min_y());
+        let blocks = &self.level.registries().blocks;
+        (bottom..=top).rev().find_map(|y| {
+            let pos = BlockPos::new(bx, y, bz);
+            let state = self.level.block(pos);
+            if blocks.is_air(state) || self.foliage(pos) {
+                return None;
+            }
+            let shape_top = blocks.collision_boxes(state).iter().map(|b| b[4]).fold(f64::NEG_INFINITY, f64::max);
+            shape_top.is_finite().then(|| f64::from(y) + shape_top)
+        })
     }
 }
 

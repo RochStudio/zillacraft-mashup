@@ -643,16 +643,14 @@ impl ServerSim {
         }
     }
 
-    /// What a fallen kaiju leaves: its experience, and Godzilla 16-32 diamonds and emeralds
-    /// (the mod's Godzilla scales, all Zilla drops, have no item here).
+    /// What a fallen kaiju leaves: its experience and its loot (Godzilla diamonds and emeralds,
+    /// the apes leather and bones; the mod's scales and fur have no item here).
     fn drop_kaiju_loot(&mut self, at: [f64; 3], species: &kaiju::Species) {
-        if species.id == kaiju::godzilla::SPECIES.id {
-            let roll = (at[0].to_bits() ^ at[2].to_bits()) as usize;
-            for (i, item) in ["minecraft:diamond", "minecraft:emerald"].into_iter().enumerate() {
-                let count = 16 + ((roll >> (i * 5)) % 17) as i32;
-                let spread = [((roll >> 3) % 7) as f64 * 0.05 - 0.15, 0.3, ((roll >> 7) % 7) as f64 * 0.05 - 0.15];
-                self.spawn_item(item, count, None, [at[0], at[1] + 2.0, at[2]], spread, 10, 0);
-            }
+        let roll = (at[0].to_bits() ^ at[2].to_bits()) as usize;
+        for (i, &(item, fewest, most)) in species.loot.iter().enumerate() {
+            let count = fewest + ((roll >> (i * 5)) % (most - fewest + 1) as usize) as i32;
+            let spread = [((roll >> 3) % 7) as f64 * 0.05 - 0.15, 0.3, ((roll >> 7) % 7) as f64 * 0.05 - 0.15];
+            self.spawn_item(item, count, None, [at[0], at[1] + 2.0, at[2]], spread, 10, 0);
         }
         self.award_experience(at, species.experience);
     }

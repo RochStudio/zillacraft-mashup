@@ -94,8 +94,10 @@ pub const SPECIES: Species = Species {
     crush_budget: 60,
     crush_hardness: 3.0,
     experience: 400,
-    tail: TAIL,
-    stomp: STOMP,
+    // Its scales are all it drops in the mod, and they have no item here.
+    loot: &[],
+    tail: Some(TAIL),
+    stomp: Some(STOMP),
     bite: Some(BITE),
     roar_ticks: ROAR_TICKS,
     tail_cooldown: (110, 50),
@@ -108,6 +110,8 @@ pub const SPECIES: Species = Species {
     move_volume: 4.0,
     move_pitch: 1.35,
     voice_volume: 2.5,
+    voice_pitch: 1.0,
     // `BossEvent.BossBarColor.GREEN`.
     boss_color: [0.12, 0.8, 0.18],
+    ape: None,
 };

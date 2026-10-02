@@ -12,7 +12,9 @@ RochStudio's Minecraft mod ZillaCraft, and more to fight them with.
 
 - **Godzilla** (Godzilla Minus One): a 50-block boss with his atomic breath, tail swipe, stomp and claws.
 - **Zilla**: the 14.5-block Godzilla of Odo Island. It roars when it first sees you, then bites and flings, swipes its tail and stomps.
-- Each kaiju's model, textures, sounds, moves and stats come from ZillaCraft. A red warning marks the ground before every move, they crush the terrain they walk through, and each one has a boss bar.
+- **Kong**: a 14.5-block territorial ape. He beats his chest at anyone who comes near and fights whoever comes closer or shoots him: a backhand swipe, a ground slam whose shockwave you can jump, boulders thrown at where you stood, and leaps onto you. Below half health he is enraged: his eyes glow, his bar turns red, and he hits harder and throws two boulders.
+- **King Kong**: Kong at Godzilla's size, 50 blocks tall, with the same moves at his scale.
+- Each kaiju's model, textures, sounds, moves and stats come from ZillaCraft. A red warning marks the ground before every move, and each one has a boss bar. Godzilla and Zilla crush the terrain they walk through; the apes wade through it.
 - Guns, grenades, rockets, killstreaks and the knife all hurt the kaiju, and Minecraft's mobs too.
 - **Creative mode**: double-tap jump to fly, nothing hurts you, blocks break instantly and never run out, middle-click picks a block, and Minecraft's creative inventory opens with **E**, with its tabs and search.
 - Real inventory icons for every Minecraft item, chests, banners, shulker boxes, heads and shields included.
@@ -25,6 +27,8 @@ Console commands (open the console with the backtick key, `` ` ``):
 | --- | --- |
 | `kaiju godzilla [distance]` | Godzilla drops in that many blocks in front of you (default 60) |
 | `kaiju zilla [distance]` | Zilla drops in (default 30) |
+| `kaiju kong [distance]` | Kong drops in (default 30) |
+| `kaiju kingkong [distance]` | King Kong drops in (default 60) |
 | `kaiju clear` | Every kaiju goes |
 | `creative [on\|off]` | Creative mode |
 | `give <item> [count]` | Minecraft items, such as `give diamond_block 64` |
@@ -103,5 +107,5 @@ Plug in a controller and play; the game follows whichever controller you last to
 - [IW4L](https://github.com/vladtrc/iw4L) by vladtrc and contributors: the MW2 rewrite everything runs on (Apache-2.0, see [NOTICE](NOTICE)).
 - [MinecraftOSS](third_party/minecraftoss/README.md): the Rust Minecraft engine behind the world, mobs and items.
 - ZillaCraft by RochStudio: the kaiju's models, textures, sounds and behaviour. Its files in `crates/kaiju/assets` are not covered by this repository's Apache-2.0 licence; all rights reserved (see [NOTICE](NOTICE)).
-- Godzilla and all related characters are trademarks of Toho Co., Ltd. This is an unofficial, non-commercial fan project, not affiliated with or endorsed by Toho.
+- Godzilla and all related characters are trademarks of Toho Co., Ltd.; Kong and King Kong belong to their respective owners. This is an unofficial, non-commercial fan project, not affiliated with or endorsed by any of them.
 - Minecraft is a trademark of Mojang Studios, and its files are downloaded from Mojang, not redistributed here. Modern Warfare 2 and Skate 3 belong to their owners. You need your own copies. This project isn't affiliated with any of them.

@@ -388,8 +388,8 @@ fn build_internal<S: Scene>(scene: &S, packs: &PackStack, preload_blocks: bool) 
     textures.insert(ResourceId::parse("minecraft:entity/enderman/enderman_eyes")?, ());
     textures.insert(ResourceId::parse("minecraft:entity/witch/witch")?, ());
     textures.insert(ResourceId::parse("minecraft:entity/iron_golem/iron_golem")?, ());
-    // ZillaCraft's Godzilla and Zilla, from its own pack when it's loaded.
-    for id in [kaiju::pack::SKIN, kaiju::pack::GLOW, kaiju::pack::BEAM, kaiju::pack::ZILA_SKIN] {
+    // ZillaCraft's kaiju, from its own pack when it's loaded.
+    for id in kaiju::pack::TEXTURES {
         textures.insert(ResourceId::parse(id)?, ());
     }
     for cracks in ["low", "medium", "high"] {

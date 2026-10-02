@@ -88,5 +88,73 @@
   "sounds": [
    "zillacraft:entity/kaiju/bite"
   ]
+ },
+ "entity.kong.ambient": {
+  "sounds": [
+   "zillacraft:entity/kong/ambient1",
+   "zillacraft:entity/kong/ambient2"
+  ]
+ },
+ "entity.kong.hurt": {
+  "sounds": [
+   "zillacraft:entity/kong/hurt1",
+   "zillacraft:entity/kong/hurt2"
+  ]
+ },
+ "entity.kong.death": {
+  "sounds": [
+   "zillacraft:entity/kong/death"
+  ]
+ },
+ "entity.kong.roar": {
+  "sounds": [
+   "zillacraft:entity/kong/roar"
+  ]
+ },
+ "entity.kong.chest_beat": {
+  "sounds": [
+   "zillacraft:entity/kong/chest_beat"
+  ]
+ },
+ "entity.kong.grunt": {
+  "sounds": [
+   "zillacraft:entity/kong/grunt"
+  ]
+ },
+ "entity.kong.swipe": {
+  "sounds": [
+   "zillacraft:entity/kong/swipe"
+  ]
+ },
+ "entity.kong.slam": {
+  "sounds": [
+   "zillacraft:entity/kong/slam"
+  ]
+ },
+ "entity.kong.rip": {
+  "sounds": [
+   "zillacraft:entity/kong/rip"
+  ]
+ },
+ "entity.kong.throw": {
+  "sounds": [
+   "zillacraft:entity/kong/throw"
+  ]
+ },
+ "entity.kong.leap": {
+  "sounds": [
+   "zillacraft:entity/kong/leap"
+  ]
+ },
+ "entity.kong.step": {
+  "sounds": [
+   "zillacraft:entity/kong/step1",
+   "zillacraft:entity/kong/step2"
+  ]
+ },
+ "entity.boulder.impact": {
+  "sounds": [
+   "zillacraft:entity/kong/boulder_impact"
+  ]
  }
 }

@@ -20,8 +20,14 @@ struct RawPart {
     name: String,
     offset: [f32; 3],
     rotation: [f32; 3],
+    #[serde(default = "unscaled")]
+    scale: [f32; 3],
     cubes: Vec<RawCube>,
     children: Vec<RawPart>,
+}
+
+fn unscaled() -> [f32; 3] {
+    [1.0; 3]
 }
 
 #[derive(Deserialize)]
@@ -41,7 +47,7 @@ pub struct Cube {
     pub mirror: bool,
 }
 
-/// Where a part sits relative to its parent: a pivot offset and a rotation (radians).
+/// Where a part sits relative to its parent: a pivot offset, a rotation (radians) and a scale.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PartPose {
     pub x: f32,
@@ -50,6 +56,9 @@ pub struct PartPose {
     pub x_rot: f32,
     pub y_rot: f32,
     pub z_rot: f32,
+    pub x_scale: f32,
+    pub y_scale: f32,
+    pub z_scale: f32,
     pub visible: bool,
 }
 
@@ -90,6 +99,11 @@ impl Model {
         self.parts.iter().position(|p| p.path == path)
     }
 
+    /// The part called `name`, wherever it is (`getAnyDescendantWithName`).
+    pub fn find_named(&self, name: &str) -> Option<usize> {
+        self.parts.iter().position(|p| p.name == name)
+    }
+
     pub fn rest_pose(&self) -> Vec<PartPose> {
         self.parts.iter().map(|p| p.rest).collect()
     }
@@ -127,7 +141,10 @@ impl Model {
         let mut shown = Vec::with_capacity(self.parts.len());
         for (i, part) in self.parts.iter().enumerate() {
             let p = pose[i];
-            let local = Mat34::translation(p.x / 16.0, p.y / 16.0, p.z / 16.0).mul(&Mat34::rotation_zyx(p.z_rot, p.y_rot, p.x_rot));
+            // `ModelPart.translateAndRotate`: move to the pivot, turn, then scale.
+            let local = Mat34::translation(p.x / 16.0, p.y / 16.0, p.z / 16.0)
+                .mul(&Mat34::rotation_zyx(p.z_rot, p.y_rot, p.x_rot))
+                .mul(&Mat34::scale(p.x_scale, p.y_scale, p.z_scale));
             let (parent, parent_shown) = match part.parent {
                 Some(j) => (world[j], shown[j]),
                 None => (*to_world, true),
@@ -162,6 +179,9 @@ fn flatten(raw: &RawPart, parent: Option<usize>, parent_path: &str, out: &mut Ve
             x_rot: raw.rotation[0],
             y_rot: raw.rotation[1],
             z_rot: raw.rotation[2],
+            x_scale: raw.scale[0],
+            y_scale: raw.scale[1],
+            z_scale: raw.scale[2],
             visible: true,
         },
         cubes: raw

@@ -4,7 +4,12 @@
 //! brain what it can see, and the brain turns it, says where to walk, and lists what happens:
 //! hits, sounds, blasts, blocks to crush. No pathfinding: no path is ever that wide. It walks
 //! straight at things, turning slowly, crushing whatever is in the way. What kind of kaiju it is
-//! (its size, moves and voice) comes from its [`Species`].
+//! (its size, moves and voice) comes from its [`Species`]; the apes behave in their own way
+//! (`brain/ape.rs`).
+
+mod ape;
+
+pub use ape::ground_under;
 
 use crate::anim::Move;
 use crate::combat::{GROUND_REACH_DY, Tail};
@@ -55,6 +60,13 @@ pub trait Arena {
     fn clip_blocks(&self, from: [f64; 3], to: [f64; 3]) -> Option<[f64; 3]>;
     /// The top of the ground near `near_y` at (x, z).
     fn surface_y(&self, x: f64, z: f64, near_y: f64) -> f64;
+    /// As an ape sees the world, where trees and foliage are something to wade through, see past
+    /// and throw through (`KongTerrain`): where a line first hits the ground (anything solid but
+    /// foliage)...
+    fn clip_ground(&self, from: [f64; 3], to: [f64; 3]) -> Option<[f64; 3]>;
+    /// ...and the top of the highest ground at (x, z), from `above` blocks over `near_y` down to
+    /// `below` blocks under it.
+    fn ground_at(&self, x: f64, z: f64, near_y: f64, above: i32, below: i32) -> Option<f64>;
 }
 
 /// What happened this tick, for the host to carry out.
@@ -85,6 +97,10 @@ pub enum Cause {
     Stomp,
     Bite,
     AtomicBreath,
+    /// The apes': the backhand, a slam's or a landing's shockwave, a thrown boulder.
+    Swipe,
+    Shockwave,
+    Boulder,
 }
 
 /// Where the host should walk it this tick: towards `to` at `speed` times its walking speed.
@@ -126,6 +142,10 @@ pub struct Brain {
     /// The target hurt it: it keeps after it even if it isn't fair game on sight.
     provoked: bool,
     rng: u64,
+    /// An ape's own state.
+    ape: ape::ApeState,
+    /// Boulders an ape has thrown, still in the air.
+    pub boulders: Vec<crate::ape::Boulder>,
 }
 
 impl Brain {
@@ -155,6 +175,8 @@ impl Brain {
             target: None,
             provoked: false,
             rng: seed | 1,
+            ape: ape::ApeState::default(),
+            boulders: Vec::new(),
         }
     }
 
@@ -192,6 +214,10 @@ impl Brain {
     /// receives where to walk, and `effects` what happens.
     pub fn tick(&mut self, body: &mut Body, seen: &[Seen], arena: &impl Arena, walk_out: &mut Option<Walk>, effects: &mut Vec<Effect>) {
         *walk_out = None;
+        if let Some(ape) = self.species.ape {
+            self.tick_ape(ape, body, seen, arena, walk_out, effects);
+            return;
+        }
         self.claw_cooldown = self.claw_cooldown.saturating_sub(1);
         self.tail_cooldown = self.tail_cooldown.saturating_sub(1);
         self.stomp_cooldown = self.stomp_cooldown.saturating_sub(1);
@@ -232,7 +258,7 @@ impl Brain {
         }
 
         // The rampage: it pulverizes what it wades through, across its whole height.
-        let tail_sweeping = self.movement == Move::TailSwipe && self.species.tail.sweeping(self.move_ticks);
+        let tail_sweeping = self.movement == Move::TailSwipe && self.species.tail.is_some_and(|tail| tail.sweeping(self.move_ticks));
         if body.moving || body.blocked || tail_sweeping {
             self.crush(body, effects);
         }
@@ -264,6 +290,14 @@ impl Brain {
         self.retreat = None;
         self.target = Some(attacker);
         self.provoked = true;
+    }
+
+    /// It was hurt down to `health_share` of its health: an ape below half is enraged as soon as
+    /// it is free to roar.
+    pub fn wounded(&mut self, health_share: f32) {
+        if self.species.ape.is_some() && !self.ape.enraged && health_share <= 0.5 {
+            self.ape.pending_enrage = true;
+        }
     }
 
     /// It comes for `player` (whoever summoned it), if it is fair game.
@@ -388,19 +422,22 @@ impl Brain {
         let half_width = target.width / 2.0;
         let dy = target.feet[1] - body.feet[1];
         let top = target.feet[1] + target.height - body.feet[1];
-        let tail = species.tail;
-        let bearing = tail.bearing_from_pivot(forward, side);
+        let swipe_at = species.tail.map(|tail| (tail, tail.bearing_from_pivot(forward, side)));
         let choice = if species.roar_ticks > 0 && self.roar_cooldown == 0 && self.roared_at != Some(target.id) && target.visible {
             Some((Move::Roar, 1))
-        } else if self.tail_cooldown == 0
-            && dy >= -GROUND_REACH_DY
-            && tail.worth_swiping(bearing, tail.distance_from_pivot(forward, side), half_width, dy, top)
-        {
+        } else if let Some((_, bearing)) = swipe_at.filter(|&(tail, bearing)| {
+            self.tail_cooldown == 0
+                && dy >= -GROUND_REACH_DY
+                && tail.worth_swiping(bearing, tail.distance_from_pivot(forward, side), half_width, dy, top)
+        }) {
             Some((Move::TailSwipe, Tail::direction_for(bearing)))
         } else if self.bite_cooldown == 0 && species.bite.is_some_and(|bite| bite.worth_it(forward, side, half_width, dy)) {
             // It flings its catch to whichever side.
             Some((Move::Bite, if self.chance(2) { 1 } else { -1 }))
-        } else if self.stomp_cooldown == 0 && dy.abs() <= GROUND_REACH_DY && species.stomp.worth_it(forward.hypot(side), half_width) {
+        } else if self.stomp_cooldown == 0
+            && dy.abs() <= GROUND_REACH_DY
+            && species.stomp.is_some_and(|stomp| stomp.worth_it(forward.hypot(side), half_width))
+        {
             Some((Move::Stomp, if side >= 0.0 { 1 } else { -1 }))
         } else {
             None
@@ -413,9 +450,10 @@ impl Brain {
         self.move_ticks = 0;
         self.move_yaw = body.yaw;
         self.hit.clear();
-        let stomp = species.stomp;
-        let (fx, fz) = to_world(body, stomp.foot_forward, f64::from(direction) * stomp.foot_side, self.move_yaw);
-        self.foot = [fx, body.feet[1], fz];
+        if let Some(stomp) = species.stomp {
+            let (fx, fz) = to_world(body, stomp.foot_forward, f64::from(direction) * stomp.foot_side, self.move_yaw);
+            self.foot = [fx, body.feet[1], fz];
+        }
         let pitch = self.voice_pitch();
         if movement == Move::Roar {
             self.roared_at = Some(target.id);
@@ -430,17 +468,17 @@ impl Brain {
         self.move_ticks += 1;
         let species = self.species;
         let total = match self.movement {
-            Move::TailSwipe => species.tail.total(),
-            Move::Stomp => species.stomp.total,
+            Move::TailSwipe => species.tail.map_or(0, |tail| tail.total()),
+            Move::Stomp => species.stomp.map_or(0, |stomp| stomp.total),
             Move::Bite => species.bite.map_or(0, |bite| bite.total()),
             Move::Roar => species.roar_ticks,
-            Move::None => 0,
+            _ => 0,
         };
         match self.movement {
             Move::TailSwipe => self.tick_tail(body, seen, arena, effects),
             Move::Stomp => self.tick_stomp(body, seen, arena, effects),
             Move::Bite => self.tick_bite(body, seen, arena, effects),
-            Move::Roar | Move::None => {}
+            _ => {}
         }
         if self.move_ticks >= total {
             match self.movement {
@@ -448,7 +486,7 @@ impl Brain {
                 Move::Stomp => self.stomp_cooldown = self.cooldown(species.stomp_cooldown),
                 Move::Bite => self.bite_cooldown = self.cooldown(species.bite_cooldown),
                 Move::Roar => self.roar_cooldown = species.roar_cooldown,
-                Move::None => {}
+                _ => {}
             }
             // A roar is only a warning: it may strike straight after one.
             self.recovery = if self.movement == Move::Roar { 0 } else { species.move_recovery };
@@ -470,7 +508,7 @@ impl Brain {
 
     fn tick_tail(&mut self, body: &Body, seen: &[Seen], arena: &impl Arena, effects: &mut Vec<Effect>) {
         let species = self.species;
-        let tail = species.tail;
+        let Some(tail) = species.tail else { return };
         let t = self.move_ticks;
         let yaw = self.move_yaw;
         if t < tail.windup {
@@ -525,7 +563,7 @@ impl Brain {
 
     fn tick_stomp(&mut self, body: &Body, seen: &[Seen], arena: &impl Arena, effects: &mut Vec<Effect>) {
         let species = self.species;
-        let stomp = species.stomp;
+        let Some(stomp) = species.stomp else { return };
         let t = self.move_ticks;
         if t < stomp.windup {
             if t % 3 == 1 {
@@ -727,11 +765,12 @@ impl Brain {
             max_hardness: s.crush_hardness,
         });
         // Its legs and the tail carve through terrain too, never below its ground plane.
-        let tail_angle = if self.movement == Move::TailSwipe { s.tail.angle(f64::from(self.move_ticks), self.move_direction) } else { 0.0 };
-        for (i, seg) in s.tail.segments.iter().enumerate() {
+        let Some(tail) = s.tail else { return };
+        let tail_angle = if self.movement == Move::TailSwipe { tail.angle(f64::from(self.move_ticks), self.move_direction) } else { 0.0 };
+        for (i, seg) in tail.segments.iter().enumerate() {
             let (mut forward, mut side) = (seg.forward, seg.side);
             if tail_angle != 0.0 {
-                (forward, side) = s.tail.swing_point(forward, side, tail_angle);
+                (forward, side) = tail.swing_point(forward, side, tail_angle);
             }
             let (x, z) = to_world(body, forward, side, body.yaw);
             let half = seg.width / 2.0 + 0.25;
@@ -822,6 +861,18 @@ mod tests {
         fn surface_y(&self, _: f64, _: f64, near_y: f64) -> f64 {
             near_y
         }
+
+        fn clip_ground(&self, from: [f64; 3], to: [f64; 3]) -> Option<[f64; 3]> {
+            // The ground is the plane y = 0.
+            (from[1] >= 0.0 && to[1] < 0.0).then(|| {
+                let t = from[1] / (from[1] - to[1]);
+                [from[0] + (to[0] - from[0]) * t, 0.0, from[2] + (to[2] - from[2]) * t]
+            })
+        }
+
+        fn ground_at(&self, _: f64, _: f64, near_y: f64, above: i32, below: i32) -> Option<f64> {
+            (near_y - f64::from(below) <= 0.0 && near_y + f64::from(above) >= 0.0).then_some(0.0)
+        }
     }
 
     /// The moves a kaiju starts and the hits it lands over `ticks`, a player standing `ahead`
@@ -856,6 +907,71 @@ mod tests {
         assert!(hits.contains(&Cause::Bite), "{hits:?}");
         // Already before its jaws: it holds its ground rather than walk onto it.
         assert!(!walked);
+    }
+
+    /// An ape and a player `ahead` blocks in front of it (and `up` above it) over `ticks`: the
+    /// moves it makes, the hits it lands, and its brain.
+    fn ape_fight(species: &'static Species, ahead: f64, up: f64, aggro: bool, ticks: u32, wounded: bool) -> (Vec<Move>, Vec<Cause>, Brain) {
+        let mut brain = Brain::new(3, species);
+        if aggro {
+            brain.aggro(7);
+        }
+        if wounded {
+            brain.wounded(0.4);
+        }
+        let mut body = Body::default();
+        let seen = [Seen { id: 7, feet: [0.0, up, ahead], width: 0.6, height: 1.8, on_ground: true, is_player: true, visible: true, targetable: true }];
+        let (mut walk, mut effects, mut moves, mut hits) = (None, Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..ticks {
+            let before = (brain.movement, brain.move_ticks);
+            effects.clear();
+            brain.tick(&mut body, &seen, &Flat, &mut walk, &mut effects);
+            brain.tick_boulders(&seen, &Flat, &mut effects);
+            if brain.movement != Move::None && (brain.movement != before.0 || brain.move_ticks < before.1) {
+                moves.push(brain.movement);
+            }
+            hits.extend(effects.iter().filter_map(|e| match e {
+                Effect::Hit { cause, .. } => Some(*cause),
+                _ => None,
+            }));
+            // It stays on the ground, as its host keeps it.
+            if !brain.airborne() {
+                body.feet[1] = 0.0;
+            }
+        }
+        (moves, hits, brain)
+    }
+
+    #[test]
+    fn kong_warns_whoever_comes_near_and_fights_whoever_comes_close() {
+        // Inside his warning radius, outside his engage radius: a roar, and he lets them be.
+        let (moves, hits, brain) = ape_fight(&crate::kong::KONG, 20.0, 0.0, false, 300, false);
+        assert_eq!(moves, [Move::Roar], "{moves:?}");
+        assert!(hits.is_empty() && brain.target.is_none(), "{hits:?}");
+        // Close: a roar, then he swipes and slams.
+        let (moves, hits, _) = ape_fight(&crate::kong::KONG, 6.0, 0.0, false, 400, false);
+        assert_eq!(moves.first(), Some(&Move::Roar), "{moves:?}");
+        assert!(moves.iter().any(|m| matches!(m, Move::Swipe | Move::Slam)), "{moves:?}");
+        assert!(hits.iter().any(|c| matches!(c, Cause::Swipe | Cause::Shockwave)), "{hits:?}");
+    }
+
+    #[test]
+    fn king_kong_leaps_and_throws_at_what_is_out_of_reach() {
+        // Far off on the same level (and summoned at it): leaps and boulders.
+        let (moves, hits, _) = ape_fight(&crate::kong::KING_KONG, 65.0, 0.0, true, 600, false);
+        assert!(moves.iter().any(|m| matches!(m, Move::Leap | Move::Boulder)), "{moves:?}");
+        assert!(!hits.is_empty(), "{moves:?}");
+        // Up on a ledge: only boulders, and they land on it.
+        let (moves, hits, _) = ape_fight(&crate::kong::KING_KONG, 20.0, 9.0, true, 400, false);
+        assert!(moves.contains(&Move::Boulder) && !moves.iter().any(|m| matches!(m, Move::Swipe | Move::Slam | Move::Leap)), "{moves:?}");
+        assert!(hits.contains(&Cause::Boulder), "{hits:?}");
+    }
+
+    #[test]
+    fn an_ape_below_half_health_roars_and_is_enraged() {
+        let (moves, _, brain) = ape_fight(&crate::kong::KONG, 60.0, 0.0, false, 60, true);
+        assert_eq!(moves, [Move::Roar], "{moves:?}");
+        assert!(brain.enraged());
     }
 
     #[test]

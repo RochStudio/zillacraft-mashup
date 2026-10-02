@@ -561,8 +561,8 @@ impl Entities {
         out
     }
 
-    /// `kaiju godzilla` or `kaiju zilla`: it drops in `distance` blocks in front of the player,
-    /// facing it. `kaiju clear` removes every kaiju.
+    /// `kaiju godzilla`, `kaiju zilla`, `kaiju kong` or `kaiju kingkong`: it drops in `distance`
+    /// blocks in front of the player, facing it. `kaiju clear` removes every kaiju.
     pub(crate) fn summon_kaiju(&mut self, kind: &str, feet: [f64; 3], yaw: f32, distance: f64) {
         if kind == "clear" {
             self.server.kaiju_clear();
@@ -577,15 +577,19 @@ impl Entities {
     }
 
     /// The kaiju alive near `feet`, for their boss bars, nearest first and `most` at most: each
-    /// one's name, the share of its health left, and its bar's colour. A boss's bar shows while
-    /// a player is in tracking range of it (`ServerBossEvent`, 10 chunks).
+    /// one's name, the share of its health left, and its bar's colour (an enraged ape's turns
+    /// red). A boss's bar shows while a player is in tracking range of it (`ServerBossEvent`, 10
+    /// chunks).
     pub(crate) fn kaiju_bosses(&self, feet: [f64; 3], most: usize) -> Vec<(&'static str, f32, [f32; 3])> {
         let away = |at: [f64; 3]| (at[0] - feet[0]).hypot(at[2] - feet[2]);
         let mut near: Vec<_> = self.kaiju.iter().filter(|k| k.death_ticks == 0 && away(k.feet) <= 160.0).collect();
         near.sort_by(|a, b| away(a.feet).total_cmp(&away(b.feet)));
         near.into_iter()
             .take(most)
-            .map(|k| (k.species.name, k.health / k.max_health, k.species.boss_color))
+            .map(|k| {
+                let color = if k.enraged { kaiju::kong::ENRAGED_BOSS_COLOR } else { k.species.boss_color };
+                (k.species.name, k.health / k.max_health, color)
+            })
             .collect()
     }
 

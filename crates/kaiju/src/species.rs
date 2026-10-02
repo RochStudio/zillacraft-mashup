@@ -1,6 +1,7 @@
 //! What sets one kaiju apart from another: its size, its stats, its moves and its voice. The
 //! brain, the server and the renderer read everything kind-specific from here.
 
+use crate::ape::Ape;
 use crate::combat::{Bite, Stomp, Tail};
 use crate::hitboxes::BodyBox;
 
@@ -21,9 +22,10 @@ pub struct Species {
     pub max_health: f32,
     pub armor: f32,
     pub toughness: f32,
-    /// Blocks per tick at full stride.
+    /// Blocks per tick at full stride (an ape's chasing speed).
     pub speed: f64,
-    /// It climbs rises this tall without stopping; anything taller it has to crush first.
+    /// It climbs rises this tall without stopping; anything taller it has to crush first (an ape
+    /// climbs anything, but only looks this far up for the ground it walks on).
     pub step_height: i32,
     /// Degrees per tick.
     pub turn_rate: f32,
@@ -37,8 +39,11 @@ pub struct Species {
     pub crush_budget: u32,
     pub crush_hardness: f32,
     pub experience: i32,
-    pub tail: Tail,
-    pub stomp: Stomp,
+    /// What it leaves besides: (item, fewest, most).
+    pub loot: &'static [(&'static str, i32, i32)],
+    /// The reptiles' moves; an ape has none of these, but its own ([`Species::ape`]).
+    pub tail: Option<Tail>,
+    pub stomp: Option<Stomp>,
     pub bite: Option<Bite>,
     /// How long it roars at something it has just set eyes on (0: it doesn't roar).
     pub roar_ticks: u32,
@@ -52,20 +57,23 @@ pub struct Species {
     /// Whether it has the atomic breath.
     pub breathes: bool,
     pub hitboxes: &'static [BodyBox],
-    /// Loudness and pitch of its moves' sounds, and how loud its voice is.
+    /// Loudness and pitch of its moves' sounds, and how loud and how deep its voice is.
     pub move_volume: f32,
     pub move_pitch: f32,
     pub voice_volume: f32,
+    pub voice_pitch: f32,
     pub boss_color: [f32; 3],
+    /// An ape (Kong, King Kong): how big, for its own moves.
+    pub ape: Option<Ape>,
 }
 
 /// Every kind there is, for looking one up by name.
-pub const ALL: [&Species; 2] = [&crate::godzilla::SPECIES, &crate::zila::SPECIES];
+pub const ALL: [&Species; 4] = [&crate::godzilla::SPECIES, &crate::zila::SPECIES, &crate::kong::KONG, &crate::kong::KING_KONG];
 
-/// The kind `name` names: its id or its name, in any case (`zilla`, `zillacraft:zila`).
+/// The kind `name` names: its id or its name, in any case and with or without spaces or
+/// underscores (`zilla`, `zillacraft:zila`, `kingkong`, `King Kong`).
 pub fn named(name: &str) -> Option<&'static Species> {
-    let name = name.to_ascii_lowercase();
-    ALL.into_iter().find(|s| {
-        s.id == name || s.name.to_ascii_lowercase() == name || s.id.rsplit(':').next() == Some(name.as_str())
-    })
+    let squash = |s: &str| s.to_ascii_lowercase().replace([' ', '_'], "");
+    let name = squash(name);
+    ALL.into_iter().find(|s| squash(s.id) == name || squash(s.name) == name || s.id.rsplit(':').next().map(squash) == Some(name.clone()))
 }

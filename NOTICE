@@ -65,8 +65,9 @@ crates/kaiju/assets/ — the kaiju's textures, sounds and model geometry, from
   RochStudio's Minecraft mod ZillaCraft. Copyright (c) 2026 RochStudio. All
   rights reserved: these files are not covered by this repository's Apache-2.0
   licence. "Godzilla" and all related characters, names and likenesses are
-  trademarks and copyrights of Toho Co., Ltd. ZillaCraft is an unofficial,
-  non-commercial fan project, not affiliated with or endorsed by Toho.
+  trademarks and copyrights of Toho Co., Ltd.; "Kong" and "King Kong" belong
+  to their respective owners. ZillaCraft is an unofficial, non-commercial fan
+  project, not affiliated with or endorsed by any of them.
 
 third_party/bevy_audio/ — Bevy's bevy_audio crate, version 0.19.0
   (https://github.com/bevyengine/bevy), under MIT OR Apache-2.0 with both

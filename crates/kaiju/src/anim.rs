@@ -1,7 +1,7 @@
 //! Godzilla's animation: a heavy rolling gait, a swaying tail, his jaw opening for the atomic
 //! breath while his dorsal plates rise and light up from the tail tip to the neck, and the
 //! tail swipe and stomp. What every kaiju's animation reads ([`AnimState`]) is here too;
-//! Zilla's rig is in `zila_anim`.
+//! Zilla's rig is in `zila_anim`, the apes' in `ape_anim`.
 
 use crate::godzilla;
 use crate::model::{Model, PartPose};
@@ -19,8 +19,15 @@ pub enum Move {
     Stomp,
     /// Zilla's: it rears back, lunges and snaps, and flings what it catches aside.
     Bite,
-    /// Zilla's, at whatever it first sets eyes on.
+    /// Zilla's, at whatever it first sets eyes on; the apes' chest-beating warning.
     Roar,
+    /// The apes' (see `ape`): a backhand along the ground, a two-fisted ground pound, a boulder
+    /// thrown, a leap, and the touchdown after it.
+    Swipe,
+    Slam,
+    Boulder,
+    Leap,
+    Land,
 }
 
 /// Everything the animation reads, interpolated for the frame being drawn.
@@ -143,7 +150,7 @@ impl Rig {
         match s.movement {
             Move::TailSwipe => self.tail_swipe(&mut p, s.move_time, s.move_direction),
             Move::Stomp => self.stomp(&mut p, s.move_time, s.move_direction),
-            Move::Bite | Move::Roar | Move::None => {}
+            _ => {}
         }
 
         // The breath's charge: plates light up and rise one after another, tail tip first.
