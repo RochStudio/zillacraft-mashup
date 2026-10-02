@@ -374,6 +374,18 @@ impl KaijuWorld {
                 k.velocity[1] = 0.0;
                 k.on_ground = true;
             }
+            // More than a step down under its middle, or nothing: a hole (a crater, a shaft, a
+            // cave mouth) or a drop. Its body rests on whatever is under the rest of it, as a
+            // mob's box does, so only a hole as wide as it swallows it.
+            // (Only standing on a block's top, not part way through a fall.)
+            ground
+                if (k.body.feet[1] - k.body.feet[1].round()).abs() < 1e-6
+                    && ground.is_none_or(|top| k.body.feet[1] - top > f64::from(species.step_height))
+                    && footprint_holds(level, k.body.feet, species.width) =>
+            {
+                k.velocity[1] = 0.0;
+                k.on_ground = true;
+            }
             _ => {
                 k.velocity[1] = (k.velocity[1] - GRAVITY) * 0.98;
                 let fallen = k.body.feet[1] + k.velocity[1];
@@ -489,6 +501,21 @@ fn ground_top(level: &Level<'static>, x: f64, z: f64, near: i32, step_height: i3
         y -= 1;
     }
     None
+}
+
+/// Whether a kaiju standing at `feet` rests on a block anywhere under its footprint, `width`
+/// across: sampled every block or two, a little in from its edge.
+fn footprint_holds(level: &Level<'static>, feet: [f64; 3], width: f64) -> bool {
+    let layer = feet[1].round() as i32 - 1;
+    let half = (width / 2.0 - 0.3).max(0.0);
+    let steps = (width / 2.0).ceil().max(1.0) as i32;
+    let along = |n: i32| -half + 2.0 * half * f64::from(n) / f64::from(steps);
+    (0..=steps).any(|i| {
+        (0..=steps).any(|j| {
+            let (x, z) = (feet[0] + along(i), feet[2] + along(j));
+            solid(level, BlockPos::new(x.floor() as i32, layer, z.floor() as i32))
+        })
+    })
 }
 
 fn solid(level: &Level<'static>, pos: BlockPos) -> bool {

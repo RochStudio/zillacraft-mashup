@@ -576,15 +576,17 @@ impl Entities {
         self.server.summon_facing(species.id.to_owned(), at, yaw + 180.0);
     }
 
-    /// The kaiju the player is fighting, for its boss bar: the nearest one alive to `feet`, as
-    /// its name, the share of its health left, and its bar's colour.
-    pub(crate) fn kaiju_boss(&self, feet: [f64; 3]) -> Option<(&'static str, f32, [f32; 3])> {
+    /// The kaiju alive near `feet`, for their boss bars, nearest first and `most` at most: each
+    /// one's name, the share of its health left, and its bar's colour. A boss's bar shows while
+    /// a player is in tracking range of it (`ServerBossEvent`, 10 chunks).
+    pub(crate) fn kaiju_bosses(&self, feet: [f64; 3], most: usize) -> Vec<(&'static str, f32, [f32; 3])> {
         let away = |at: [f64; 3]| (at[0] - feet[0]).hypot(at[2] - feet[2]);
-        self.kaiju
-            .iter()
-            .filter(|k| k.death_ticks == 0)
-            .min_by(|a, b| away(a.feet).total_cmp(&away(b.feet)))
+        let mut near: Vec<_> = self.kaiju.iter().filter(|k| k.death_ticks == 0 && away(k.feet) <= 160.0).collect();
+        near.sort_by(|a, b| away(a.feet).total_cmp(&away(b.feet)));
+        near.into_iter()
+            .take(most)
             .map(|k| (k.species.name, k.health / k.max_health, k.species.boss_color))
+            .collect()
     }
 
     /// Steps the client-side puffs, which settle on the scene's blocks.

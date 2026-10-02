@@ -843,7 +843,7 @@ fn update(
 
     // The mobs: a server tick when due, the blocks it changed, its hits on
     // the player, the mobs' boxes for bullets and their meshes.
-    kaiju_summons.boss = None;
+    kaiju_summons.bosses.clear();
     if let Some(entities) = entities.as_mut() {
         let player = crate::minecraft_entities::PlayerView {
             feet,
@@ -859,7 +859,11 @@ fn update(
         let bright_outside = world.environment.sky_light_level() > 11.0;
         let ticks_before = entities.client_ticks();
         let (changes, hits) = entities.tick(dt, day.ticks as i64, bright_outside, &player);
-        kaiju_summons.boss = entities.kaiju_boss(feet).map(|(name, left, color)| (name.to_owned(), left, color));
+        kaiju_summons.bosses = entities
+            .kaiju_bosses(feet, 3)
+            .into_iter()
+            .map(|(name, left, color)| (name.to_owned(), left, color))
+            .collect();
         let mob_ticks = (entities.client_ticks() - ticks_before) as u32;
         if !changes.is_empty() {
             let blocks = &world.registries.blocks;

@@ -1298,6 +1298,47 @@ mod tests {
         assert!(flowed > 0, "water should fall from the source");
     }
 
+    /// A kaiju rests on whatever is under any part of it, as a mob's box does: a hole narrower
+    /// than it (a crater, a shaft, a cave mouth) doesn't swallow it, one wider than it does.
+    #[test]
+    fn kaiju_bridge_holes_narrower_than_they_are() {
+        let Ok(paths) = DataPaths::discover() else { return };
+        let Ok(registries) = Registries::load(&paths) else { return };
+        let registries = Arc::new(registries);
+        let worldgen = Arc::new(WorldGen::new(Arc::new(TerrainGenerator::overworld(registries.clone(), 0).unwrap())).unwrap());
+        let states = Arc::new(BlockStates::new(registries.clone(), 0, -64, 384).unwrap());
+        let mut map = ChunkMap::with_worldgen(worldgen.clone(), 2, 4);
+        let mut server = ServerSim::new(worldgen, states, "minecraft:overworld");
+        for x in -1..=1 {
+            for z in -1..=1 {
+                server.load_chunk(&map.load_now(ChunkPos::new(x, z)));
+            }
+        }
+        // Two stone floors high over the terrain: one with a 2x2 hole where Zilla stands, one
+        // with a 10x10 hole, wider than its 6.
+        let (stone, floor) = (Block::new("minecraft:stone"), 250);
+        let narrow = |x: i32, z: i32| (-9..=-8).contains(&x) && (-1..=0).contains(&z);
+        let wide = |x: i32, z: i32| (19..=28).contains(&x) && (-5..=4).contains(&z);
+        for (from, to) in [(-15, -1), (17, 31)] {
+            for x in from..=to {
+                for z in -7..=7 {
+                    if !narrow(x, z) && !wide(x, z) {
+                        server.player_edit_block((x, floor, z), Some(&stone), PlayerEdit::Place);
+                    }
+                }
+            }
+        }
+        let top = f64::from(floor + 1);
+        let held = server.kaiju.spawn(&kaiju::zila::SPECIES, [-8.0, top, 0.0], 0.0, None);
+        let dropped = server.kaiju.spawn(&kaiju::zila::SPECIES, [24.0, top, 0.0], 0.0, None);
+        for _ in 0..10 {
+            server.kaiju.tick(&mut server.level, &[], false);
+        }
+        let feet = |id: u64| server.kaiju.views().into_iter().find(|v| v.id == id).map(|v| v.feet[1]);
+        assert_eq!(feet(held), Some(top), "Zilla stands across a hole narrower than it");
+        assert!(feet(dropped).is_some_and(|y| y < top - 1.0), "Zilla falls into a hole wider than it: {:?}", feet(dropped));
+    }
+
     /// Creatures the SPAWN step generated join the server's mobs with their
     /// chunk, once per session, and wander while inside the ticking area.
     #[test]

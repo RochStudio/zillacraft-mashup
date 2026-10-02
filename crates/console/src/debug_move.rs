@@ -15,53 +15,69 @@ use crate::{
 pub(crate) struct ShowposHud;
 #[derive(Component)]
 pub(crate) struct SkateHud;
+/// Boss bars shown at once: one per kaiju nearby, nearest first.
+const BOSS_BARS: usize = 3;
 #[derive(Component)]
-pub(crate) struct BossBar;
+pub(crate) struct BossBar(usize);
 #[derive(Component)]
-pub(crate) struct BossBarFill;
+pub(crate) struct BossBarFill(usize);
 #[derive(Component)]
-pub(crate) struct BossBarName;
+pub(crate) struct BossBarName(usize);
 
 pub(crate) fn spawn_showpos_hud(commands: &mut Commands, font: Handle<Font>) {
-    // A kaiju's boss bar, as Minecraft draws one: its name over a red bar, top centre.
+    // The kaiju's boss bars, as Minecraft draws them: each one's name over its bar, stacked
+    // down from the top centre.
     commands
         .spawn((
-            BossBar,
             UiLayer::Overlay,
-            Visibility::Hidden,
             Node {
                 position_type: PositionType::Absolute,
                 top: px(14),
                 left: percent(30),
                 width: percent(40),
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: px(4),
+                row_gap: px(8),
                 ..default()
             },
             GlobalZIndex(19_000),
         ))
-        .with_children(|bar| {
-            bar.spawn((
-                BossBarName,
-                Text::new(""),
-                TextFont { font: font.clone().into(), font_size: FontSize::Px(22.0), ..default() },
-                TextColor(Color::WHITE),
-                TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
-                Node { padding: UiRect::axes(px(10), px(2)), ..default() },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
-            ));
-            bar.spawn((
-                Node { width: percent(100), height: px(10), ..default() },
-                BackgroundColor(Color::srgba(0.12, 0.02, 0.02, 0.85)),
-            ))
-            .with_children(|track| {
-                track.spawn((
-                    BossBarFill,
-                    Node { width: percent(100), height: percent(100), ..default() },
-                    BackgroundColor(Color::srgb(0.85, 0.12, 0.12)),
-                ));
-            });
+        .with_children(|column| {
+            for slot in 0..BOSS_BARS {
+                column
+                    .spawn((
+                        BossBar(slot),
+                        Visibility::Hidden,
+                        Node {
+                            width: percent(100),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            row_gap: px(4),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|bar| {
+                        bar.spawn((
+                            BossBarName(slot),
+                            Text::new(""),
+                            TextFont { font: font.clone().into(), font_size: FontSize::Px(22.0), ..default() },
+                            TextColor(Color::WHITE),
+                            TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
+                            Node { padding: UiRect::axes(px(10), px(2)), ..default() },
+                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
+                        ));
+                        bar.spawn((
+                            Node { width: percent(100), height: px(10), ..default() },
+                            BackgroundColor(Color::srgba(0.12, 0.02, 0.02, 0.85)),
+                        ))
+                        .with_children(|track| {
+                            track.spawn((
+                                BossBarFill(slot),
+                                Node { width: percent(100), height: percent(100), ..default() },
+                                BackgroundColor(Color::srgb(0.85, 0.12, 0.12)),
+                            ));
+                        });
+                    });
+            }
         });
     commands.spawn((SkateHud, UiLayer::Overlay, Visibility::Hidden,
         Node { position_type: PositionType::Absolute, bottom:px(24), left:px(24),padding:UiRect::all(px(8)), ..default() },
@@ -910,26 +926,32 @@ fn parse_force_spawn(args: &[String]) -> Result<SpawnPick, String> {
 
 pub(crate) fn update_boss_bar(
     summons: Option<Res<frame::KaijuSummons>>,
-    mut bar: Query<&mut Visibility, With<BossBar>>,
-    mut fill: Query<(&mut Node, &mut BackgroundColor), With<BossBarFill>>,
-    mut name: Query<&mut Text, With<BossBarName>>,
+    mut bars: Query<(&BossBar, &mut Visibility)>,
+    mut fills: Query<(&BossBarFill, &mut Node, &mut BackgroundColor)>,
+    mut names: Query<(&BossBarName, &mut Text)>,
 ) {
-    let boss = summons.as_ref().and_then(|s| s.boss.clone());
-    for mut visibility in &mut bar {
-        *visibility = if boss.is_some() { Visibility::Visible } else { Visibility::Hidden };
-    }
-    if let Some((label, left, [r, g, b])) = boss {
-        let tint = Color::srgb(r, g, b);
-        for (mut node, mut color) in &mut fill {
-            node.width = percent(left.clamp(0.0, 1.0) * 100.0);
-            if color.0 != tint {
-                color.0 = tint;
-            }
+    let bosses = summons.as_ref().map_or(&[][..], |s| s.bosses.as_slice());
+    for (bar, mut visibility) in &mut bars {
+        let shown = if bar.0 < bosses.len() { Visibility::Visible } else { Visibility::Hidden };
+        if *visibility != shown {
+            *visibility = shown;
         }
-        for mut text in &mut name {
-            if text.0 != label {
-                text.0 = label.clone();
-            }
+    }
+    for (fill, mut node, mut color) in &mut fills {
+        let Some((_, left, [r, g, b])) = bosses.get(fill.0) else { continue };
+        let width = percent(left.clamp(0.0, 1.0) * 100.0);
+        if node.width != width {
+            node.width = width;
+        }
+        let tint = Color::srgb(*r, *g, *b);
+        if color.0 != tint {
+            color.0 = tint;
+        }
+    }
+    for (name, mut text) in &mut names {
+        let Some((label, ..)) = bosses.get(name.0) else { continue };
+        if text.0 != *label {
+            text.0 = label.clone();
         }
     }
 }

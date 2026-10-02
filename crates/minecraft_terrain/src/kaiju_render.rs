@@ -246,3 +246,68 @@ fn push_flat(mesh: &mut ChunkMesh, region: [f32; 4], corners: [Vec3; 4], uvs: [[
     mesh.indices.extend_from_slice(&[start, start + 2, start + 1, start, start + 3, start + 2]);
     mesh.faces += 2;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kaiju_server::KaijuWorld;
+    use kaiju::anim::Move;
+
+    fn standing(species: &'static kaiju::Species, yaw: f32) -> KaijuView {
+        KaijuView {
+            id: 1,
+            species,
+            feet: [0.0; 3],
+            yaw,
+            head_yaw: 0.0,
+            head_pitch: 0.0,
+            walk_position: 0.0,
+            walk_speed: 0.0,
+            movement: Move::None,
+            move_ticks: 0,
+            move_direction: 1,
+            breath_ticks: 0,
+            breath_amount: 0.0,
+            health: species.max_health,
+            max_health: species.max_health,
+            death_ticks: 0,
+            hurt_ticks: 0,
+            beam: None,
+            charge: None,
+            shockwave: None,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// The share of the corners of a kaiju's model, standing and facing `yaw`, that lie outside
+    /// every one of its hitboxes (by more than a quarter block): what bullets would pass through.
+    fn uncovered(species: &'static kaiju::Species, model: &Model, pose: &[kaiju::model::PartPose], yaw: f32) -> f32 {
+        let mut quads = Vec::new();
+        model.mesh(pose, &entity_transform(model_scale(model, species.height), yaw), &mut quads);
+        let boxes = KaijuWorld::boxes(&[standing(species, yaw)]);
+        let corners: Vec<[f32; 3]> = quads.iter().flat_map(|q| q.positions).collect();
+        let outside = corners
+            .iter()
+            .filter(|p| {
+                !boxes.iter().any(|(_, b)| {
+                    (0..3).all(|i| f64::from(p[i]) >= b[i] - 0.25 && f64::from(p[i]) <= b[i + 3] + 0.25)
+                })
+            })
+            .count();
+        outside as f32 / corners.len() as f32
+    }
+
+    #[test]
+    fn hitboxes_cover_each_kaiju_however_it_faces() {
+        let godzilla = godzilla().unwrap();
+        let zilla = zilla().unwrap();
+        for yaw in [0.0, 37.0, 90.0, 145.0, 200.0, 290.0] {
+            let pose = godzilla.rig.pose(&godzilla.model, &AnimState::default(), false);
+            let share = uncovered(&kaiju::godzilla::SPECIES, &godzilla.model, &pose, yaw);
+            assert!(share < 0.02, "Godzilla facing {yaw}: {:.1}% of his model is outside his hitboxes", share * 100.0);
+            let pose = zilla.rig.pose(&zilla.model, &AnimState::default());
+            let share = uncovered(&kaiju::zila::SPECIES, &zilla.model, &pose, yaw);
+            assert!(share < 0.02, "Zilla facing {yaw}: {:.1}% of its model is outside its hitboxes", share * 100.0);
+        }
+    }
+}
