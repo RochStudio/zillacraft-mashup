@@ -1,7 +1,38 @@
-# 2010 Rust Rewrite Mashup
+# ZillaCraft Mashup
 
-Modern Warfare 2, Skate 3 and Minecraft in one game, all running on
-[IW4L](https://github.com/vladtrc/iw4L), a from-scratch Rust rewrite of MW2.
+ZillaCraft's kaiju loose in a Modern Warfare 2 and Minecraft world.
+
+This is a fork of **[2010 Rust Rewrite Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup) by chasmlol**,
+which brought Modern Warfare 2, Skate 3 and Minecraft together in one game on
+[IW4L](https://github.com/vladtrc/iw4L), a from-scratch Rust rewrite of MW2. Everything
+below "The base game" is chasmlol's and IW4L's work. This fork adds the kaiju from
+RochStudio's Minecraft mod ZillaCraft, and more to fight them with.
+
+## What this fork adds
+
+- **Godzilla** (Godzilla Minus One): a 50-block boss with his atomic breath, tail swipe, stomp and claws.
+- **Zilla**: the 14.5-block Godzilla of Odo Island. It roars when it first sees you, then bites and flings, swipes its tail and stomps.
+- Each kaiju's model, textures, sounds, moves and stats come from ZillaCraft. A red warning marks the ground before every move, they crush the terrain they walk through, and each one has a boss bar.
+- Guns, grenades, rockets, killstreaks and the knife all hurt the kaiju, and Minecraft's mobs too.
+- **Creative mode**: double-tap jump to fly, nothing hurts you, blocks break instantly and never run out, middle-click picks a block, and Minecraft's creative inventory opens with **E**, with its tabs and search.
+- Real inventory icons for every Minecraft item, chests, banners, shulker boxes, heads and shields included.
+- Fairer spawns on the Minecraft map: 300 health, and a kaiju walks off after a kill instead of waiting at your spawn.
+- **Options → Audio → Output Device** picks which speakers or headset the game plays through.
+
+Console commands (open the console with the backtick key, `` ` ``):
+
+| Command | What it does |
+| --- | --- |
+| `kaiju godzilla [distance]` | Godzilla drops in that many blocks in front of you (default 60) |
+| `kaiju zilla [distance]` | Zilla drops in (default 30) |
+| `kaiju clear` | Every kaiju goes |
+| `creative [on\|off]` | Creative mode |
+| `give <item> [count]` | Minecraft items, such as `give diamond_block 64` |
+
+## The base game
+
+Modern Warfare 2, Skate 3 and Minecraft in one game, from
+[2010 Rust Rewrite Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup):
 
 - **MW2**: the multiplayer game, with its maps, guns, killstreaks and HUD.
 - **Skate 3 mode**: press **J** on any map to drop onto a board with Skate 3's physics, tricks and grinds.
@@ -32,7 +63,7 @@ You don't need Minecraft installed. The first time the game starts, it downloads
 
 ## How to play
 
-1. Grab the zip from [Releases](../../releases/latest) and extract it somewhere you can write to (not Program Files), or build it yourself (see [docs/BUILD.md](docs/BUILD.md)).
+1. Build it yourself (see [docs/BUILD.md](docs/BUILD.md)): this fork has no download yet, and chasmlol's release zip doesn't have the kaiju.
 2. Double-click `iw4l.exe` and confirm your MW2 folder. It then asks whether you have Skate 3: choose **Yes** and select your `default.xex`, or **No** to play without skating.
 3. To play the Minecraft world, go to **Create Game** and pick the **Minecraft** tab in the map list. The map is called **overworld**.
 
@@ -68,6 +99,9 @@ Plug in a controller and play; the game follows whichever controller you last to
 
 ## Credits
 
+- [2010 Rust Rewrite Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup) by chasmlol: the game this fork is built on, with MW2, Skate 3 mode and the Minecraft world together (Apache-2.0).
 - [IW4L](https://github.com/vladtrc/iw4L) by vladtrc and contributors: the MW2 rewrite everything runs on (Apache-2.0, see [NOTICE](NOTICE)).
 - [MinecraftOSS](third_party/minecraftoss/README.md): the Rust Minecraft engine behind the world, mobs and items.
+- ZillaCraft by RochStudio: the kaiju's models, textures, sounds and behaviour. Its files in `crates/kaiju/assets` are not covered by this repository's Apache-2.0 licence; all rights reserved (see [NOTICE](NOTICE)).
+- Godzilla and all related characters are trademarks of Toho Co., Ltd. This is an unofficial, non-commercial fan project, not affiliated with or endorsed by Toho.
 - Minecraft is a trademark of Mojang Studios, and its files are downloaded from Mojang, not redistributed here. Modern Warfare 2 and Skate 3 belong to their owners. You need your own copies. This project isn't affiliated with any of them.
