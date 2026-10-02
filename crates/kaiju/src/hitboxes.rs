@@ -50,6 +50,28 @@ pub const GODZILLA: [BodyBox; 21] = [
     tail(19.8, 23.3, 6.9, -48.9, -1.0, -0.05),
 ];
 
+/// Zilla's boxes: with its 6x9 column they cover the whole body, down to the tips of its
+/// spikes, claws and tail, standing or striding.
+pub const ZILA: [BodyBox; 17] = [
+    body(7.8, 4.2, 6.4, 8.8, 8.8, 0.0),
+    body(6.3, 5.4, 4.4, 5.35, 5.2, 0.0),
+    body(7.6, 6.2, 4.1, 4.2, 8.7, 0.0),
+    body(6.6, 6.4, 5.8, 4.9, 10.5, 0.0),
+    body(7.6, 6.2, 6.1, 0.4, 8.4, 0.0),
+    body(3.4, 1.7, 2.6, 7.6, 5.6, 2.45),
+    body(3.4, 1.7, 2.6, 7.6, 5.6, -2.45),
+    body(2.2, 2.1, 3.4, 6.3, 6.7, 1.95),
+    body(2.2, 2.1, 3.4, 6.3, 6.7, -1.95),
+    body(6.6, 2.6, 5.1, 3.4, -0.7, 2.0),
+    body(6.6, 2.6, 5.1, 3.4, -0.7, -2.0),
+    body(6.3, 7.2, 5.7, 0.55, 3.0, 0.0),
+    body(4.9, 3.0, 6.3, -2.25, -0.6, 2.1),
+    body(4.9, 3.0, 6.3, -2.25, -0.6, -2.1),
+    tail(7.1, 4.6, 6.7, -5.85, 3.8, 0.2),
+    tail(6.3, 6.2, 6.3, -10.35, 0.4, 1.3),
+    tail(6.8, 11.2, 4.0, -14.6, -0.6, 2.1),
+];
+
 /// An axis-aligned box in world blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Aabb {

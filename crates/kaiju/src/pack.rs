@@ -1,5 +1,5 @@
-//! The ZillaCraft resource pack the Minecraft map loads beside Minecraft's own: Godzilla's
-//! textures and sounds from the mod, plus the breath beam's texture.
+//! The ZillaCraft resource pack the Minecraft map loads beside Minecraft's own: Godzilla's and
+//! Zilla's textures and sounds from the mod, plus the breath beam's texture.
 
 macro_rules! files {
     ($($path:literal => $source:literal),* $(,)?) => {
@@ -14,6 +14,7 @@ pub const FILES: &[(&str, &[u8])] = files! {
     "assets/zillacraft/textures/entity/godzilla.png" => "../assets/godzilla.png",
     "assets/zillacraft/textures/entity/godzilla_glow.png" => "../assets/godzilla_glow.png",
     "assets/zillacraft/textures/entity/beam.png" => "../assets/beam.png",
+    "assets/zillacraft/textures/entity/zila.png" => "../assets/zila.png",
     "assets/zillacraft/sounds/entity/godzilla/ambient1.ogg" => "../assets/sounds/godzilla/ambient1.ogg",
     "assets/zillacraft/sounds/entity/godzilla/ambient2.ogg" => "../assets/sounds/godzilla/ambient2.ogg",
     "assets/zillacraft/sounds/entity/godzilla/breath_charge.ogg" => "../assets/sounds/godzilla/breath_charge.ogg",
@@ -23,6 +24,14 @@ pub const FILES: &[(&str, &[u8])] = files! {
     "assets/zillacraft/sounds/entity/godzilla/hurt1.ogg" => "../assets/sounds/godzilla/hurt1.ogg",
     "assets/zillacraft/sounds/entity/godzilla/hurt2.ogg" => "../assets/sounds/godzilla/hurt2.ogg",
     "assets/zillacraft/sounds/entity/godzilla/roar.ogg" => "../assets/sounds/godzilla/roar.ogg",
+    "assets/zillacraft/sounds/entity/zila/ambient1.ogg" => "../assets/sounds/zila/ambient1.ogg",
+    "assets/zillacraft/sounds/entity/zila/ambient2.ogg" => "../assets/sounds/zila/ambient2.ogg",
+    "assets/zillacraft/sounds/entity/zila/death.ogg" => "../assets/sounds/zila/death.ogg",
+    "assets/zillacraft/sounds/entity/zila/growl.ogg" => "../assets/sounds/zila/growl.ogg",
+    "assets/zillacraft/sounds/entity/zila/hurt1.ogg" => "../assets/sounds/zila/hurt1.ogg",
+    "assets/zillacraft/sounds/entity/zila/hurt2.ogg" => "../assets/sounds/zila/hurt2.ogg",
+    "assets/zillacraft/sounds/entity/zila/roar.ogg" => "../assets/sounds/zila/roar.ogg",
+    "assets/zillacraft/sounds/entity/kaiju/bite.ogg" => "../assets/sounds/kaiju/bite.ogg",
     "assets/zillacraft/sounds/entity/kaiju/crush.ogg" => "../assets/sounds/kaiju/crush.ogg",
     "assets/zillacraft/sounds/entity/kaiju/step1.ogg" => "../assets/sounds/kaiju/step1.ogg",
     "assets/zillacraft/sounds/entity/kaiju/step2.ogg" => "../assets/sounds/kaiju/step2.ogg",
@@ -33,6 +42,7 @@ pub const FILES: &[(&str, &[u8])] = files! {
 pub const SKIN: &str = "zillacraft:entity/godzilla";
 pub const GLOW: &str = "zillacraft:entity/godzilla_glow";
 pub const BEAM: &str = "zillacraft:entity/beam";
+pub const ZILA_SKIN: &str = "zillacraft:entity/zila";
 
 /// Writes the pack into `dir` (a folder pack), rewriting any file that differs. Returns `dir`.
 pub fn install(dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {

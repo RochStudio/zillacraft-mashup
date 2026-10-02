@@ -39,7 +39,7 @@ pub mod slime_render;
 pub mod enderman_render;
 pub mod witch_render;
 pub mod golem_render;
-pub mod godzilla_render;
+pub mod kaiju_render;
 pub mod wolf_render;
 pub mod flame_render;
 pub mod client_mobs;

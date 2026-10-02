@@ -93,7 +93,7 @@ pub(crate) fn spawn_showpos_hud(commands: &mut Commands, font: Handle<Font>) {
 
 pub(crate) fn register_debug_move_commands(registry: &mut ConsoleRegistry) {
     registry.register(crate::CommandSpec::new("skate").usage("skate [on|off|status] - local Skate gameplay (J toggles)"));
-    registry.register(crate::CommandSpec::new("kaiju").usage("kaiju godzilla [distance] | kaiju clear - ZillaCraft's Godzilla drops in that far in front of you (Minecraft map; default 60), or every kaiju goes"));
+    registry.register(crate::CommandSpec::new("kaiju").usage("kaiju godzilla [distance] | kaiju zilla [distance] | kaiju clear - ZillaCraft's Godzilla or Zilla drops in that far in front of you (Minecraft map; default 60 for Godzilla, 30 for Zilla), or every kaiju goes"));
     registry.register(crate::CommandSpec::new("creative").usage("creative [on|off] - creative mode: double-tap jump to fly, nothing hurts you; on the Minecraft map blocks break at once, drop nothing and never run out, and middle click picks one"));
     if registry.resolve("showpos").is_none() {
         registry.register(
@@ -194,18 +194,20 @@ pub(crate) fn route_debug_move_commands(
                 echo(format!("skate active={} ready={} controller={:?} tick={} {}",skate.active,skate.preloaded,skate.controller,skate.tick,skate.status),&mut console,&mut line);
             }
 
-            "kaiju" => match (cmd.args.first().map(String::as_str), kaiju.as_deref_mut()) {
-                (Some("godzilla"), Some(summons)) => {
-                    let distance = cmd.args.get(1).and_then(|d| d.parse::<f64>().ok()).unwrap_or(60.0).clamp(20.0, 200.0);
-                    summons.pending.push(("godzilla".to_owned(), distance));
-                    echo(format!("kaiju: Godzilla is coming, {distance:.0} blocks out"), &mut console, &mut line);
+            "kaiju" => match (cmd.args.first().map(|a| a.to_ascii_lowercase()).as_deref(), kaiju.as_deref_mut()) {
+                (Some(kind @ ("godzilla" | "zilla" | "zila")), Some(summons)) => {
+                    // Godzilla is 50 blocks tall and Zilla 14.5: each comes in from as far as suits it.
+                    let (name, default, closest) = if kind == "godzilla" { ("Godzilla", 60.0, 20.0) } else { ("Zilla", 30.0, 10.0) };
+                    let distance = cmd.args.get(1).and_then(|d| d.parse::<f64>().ok()).unwrap_or(default).clamp(closest, 200.0);
+                    summons.pending.push((kind.to_owned(), distance));
+                    echo(format!("kaiju: {name} is coming, {distance:.0} blocks out"), &mut console, &mut line);
                 }
                 (Some("clear"), Some(summons)) => {
                     summons.pending.push(("clear".to_owned(), 0.0));
                     echo("kaiju: cleared".into(), &mut console, &mut line);
                 }
-                (Some("godzilla" | "clear"), None) => echo("kaiju: only on the Minecraft map".into(), &mut console, &mut line),
-                _ => echo("usage: kaiju godzilla [distance] | kaiju clear".into(), &mut console, &mut line),
+                (Some("godzilla" | "zilla" | "zila" | "clear"), None) => echo("kaiju: only on the Minecraft map".into(), &mut console, &mut line),
+                _ => echo("usage: kaiju godzilla [distance] | kaiju zilla [distance] | kaiju clear".into(), &mut console, &mut line),
             },
             "creative" => {
                 let Some(creative) = creative.as_deref_mut() else {
@@ -909,16 +911,20 @@ fn parse_force_spawn(args: &[String]) -> Result<SpawnPick, String> {
 pub(crate) fn update_boss_bar(
     summons: Option<Res<frame::KaijuSummons>>,
     mut bar: Query<&mut Visibility, With<BossBar>>,
-    mut fill: Query<&mut Node, With<BossBarFill>>,
+    mut fill: Query<(&mut Node, &mut BackgroundColor), With<BossBarFill>>,
     mut name: Query<&mut Text, With<BossBarName>>,
 ) {
     let boss = summons.as_ref().and_then(|s| s.boss.clone());
     for mut visibility in &mut bar {
         *visibility = if boss.is_some() { Visibility::Visible } else { Visibility::Hidden };
     }
-    if let Some((label, left)) = boss {
-        for mut node in &mut fill {
+    if let Some((label, left, [r, g, b])) = boss {
+        let tint = Color::srgb(r, g, b);
+        for (mut node, mut color) in &mut fill {
             node.width = percent(left.clamp(0.0, 1.0) * 100.0);
+            if color.0 != tint {
+                color.0 = tint;
+            }
         }
         for mut text in &mut name {
             if text.0 != label {

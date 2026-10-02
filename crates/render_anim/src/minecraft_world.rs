@@ -859,7 +859,7 @@ fn update(
         let bright_outside = world.environment.sky_light_level() > 11.0;
         let ticks_before = entities.client_ticks();
         let (changes, hits) = entities.tick(dt, day.ticks as i64, bright_outside, &player);
-        kaiju_summons.boss = entities.kaiju_health().map(|(health, max)| ("Godzilla".to_owned(), health / max));
+        kaiju_summons.boss = entities.kaiju_boss(feet).map(|(name, left, color)| (name.to_owned(), left, color));
         let mob_ticks = (entities.client_ticks() - ticks_before) as u32;
         if !changes.is_empty() {
             let blocks = &world.registries.blocks;

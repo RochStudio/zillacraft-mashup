@@ -617,9 +617,9 @@ impl ServerSim {
     /// `/summon` for a mob: the level makes its tag (`SummonCommand`), and
     /// it joins the entity world as a loaded mob would.
     pub fn summon(&mut self, kind: &str, position: [f64; 3], nbt: Option<&minecraftoss_core::nbt::Tag>, y_rot: f32) -> Result<(), String> {
-        if kind == crate::kaiju_server::GODZILLA {
+        if let Some(species) = kaiju::species::ALL.into_iter().find(|s| s.id == kind) {
             // Summoned by the local player, it comes for it.
-            self.kaiju.spawn(position, y_rot, Some(0));
+            self.kaiju.spawn(species, position, y_rot, Some(0));
             return Ok(());
         }
         let tag = self.level.summon_mob(kind, position, nbt, y_rot)?;
@@ -643,15 +643,18 @@ impl ServerSim {
         }
     }
 
-    /// What a fallen Godzilla leaves: 16-32 diamonds and emeralds, and 1000 experience.
-    fn drop_kaiju_loot(&mut self, at: [f64; 3]) {
-        let roll = (at[0].to_bits() ^ at[2].to_bits()) as usize;
-        for (i, item) in ["minecraft:diamond", "minecraft:emerald"].into_iter().enumerate() {
-            let count = 16 + ((roll >> (i * 5)) % 17) as i32;
-            let spread = [((roll >> 3) % 7) as f64 * 0.05 - 0.15, 0.3, ((roll >> 7) % 7) as f64 * 0.05 - 0.15];
-            self.spawn_item(item, count, None, [at[0], at[1] + 2.0, at[2]], spread, 10, 0);
+    /// What a fallen kaiju leaves: its experience, and Godzilla 16-32 diamonds and emeralds
+    /// (the mod's Godzilla scales, all Zilla drops, have no item here).
+    fn drop_kaiju_loot(&mut self, at: [f64; 3], species: &kaiju::Species) {
+        if species.id == kaiju::godzilla::SPECIES.id {
+            let roll = (at[0].to_bits() ^ at[2].to_bits()) as usize;
+            for (i, item) in ["minecraft:diamond", "minecraft:emerald"].into_iter().enumerate() {
+                let count = 16 + ((roll >> (i * 5)) % 17) as i32;
+                let spread = [((roll >> 3) % 7) as f64 * 0.05 - 0.15, 0.3, ((roll >> 7) % 7) as f64 * 0.05 - 0.15];
+                self.spawn_item(item, count, None, [at[0], at[1] + 2.0, at[2]], spread, 10, 0);
+            }
         }
-        self.award_experience(at, 1000);
+        self.award_experience(at, species.experience);
     }
 
     /// The blasts since the last call, for the client's sound and particles.
@@ -1217,8 +1220,8 @@ fn server_loop(mut sim: ServerSim, commands: std::sync::mpsc::Receiver<Command>,
                         let tick = sim.kaiju.tick(&mut sim.level, &players, griefing);
                         out.player_hits.extend(tick.player_hits);
                         out.mob_sounds.extend(tick.sounds);
-                        for at in tick.deaths {
-                            sim.drop_kaiju_loot(at);
+                        for (at, species) in tick.deaths {
+                            sim.drop_kaiju_loot(at, species);
                         }
                     }
                     out.kaiju = Some(sim.kaiju.views());

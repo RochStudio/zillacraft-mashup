@@ -467,7 +467,7 @@ impl Entities {
             }
             if let Some(views) = output.kaiju {
                 let shown = (self.kaiju_since / TICK_SECONDS).min(1.0) as f32;
-                self.kaiju_previous = minecraft_terrain::godzilla_render::blend(&self.kaiju_previous, &self.kaiju, shown);
+                self.kaiju_previous = minecraft_terrain::kaiju_render::blend(&self.kaiju_previous, &self.kaiju, shown);
                 self.kaiju = views;
                 self.kaiju_since = 0.0;
             }
@@ -561,24 +561,30 @@ impl Entities {
         out
     }
 
-    /// `kaiju godzilla`: Godzilla drops in `distance` blocks in front of the player, facing it.
-    /// `kaiju clear` removes every kaiju.
+    /// `kaiju godzilla` or `kaiju zilla`: it drops in `distance` blocks in front of the player,
+    /// facing it. `kaiju clear` removes every kaiju.
     pub(crate) fn summon_kaiju(&mut self, kind: &str, feet: [f64; 3], yaw: f32, distance: f64) {
         if kind == "clear" {
             self.server.kaiju_clear();
             return;
         }
-        if kind != "godzilla" {
+        let Some(species) = kaiju::species::named(kind) else {
             return;
-        }
+        };
         let r = f64::from(yaw).to_radians();
-        let at = [feet[0] - r.sin() * distance, feet[1] + 30.0, feet[2] + r.cos() * distance];
-        self.server.summon_facing(minecraft_terrain::kaiju_server::GODZILLA.to_owned(), at, yaw + 180.0);
+        let at = [feet[0] - r.sin() * distance, feet[1] + species.height * 0.6, feet[2] + r.cos() * distance];
+        self.server.summon_facing(species.id.to_owned(), at, yaw + 180.0);
     }
 
-    /// The kaiju the player is fighting, for its boss bar: (health, max).
-    pub(crate) fn kaiju_health(&self) -> Option<(f32, f32)> {
-        self.kaiju.iter().find(|k| k.death_ticks == 0).map(|k| (k.health, k.max_health))
+    /// The kaiju the player is fighting, for its boss bar: the nearest one alive to `feet`, as
+    /// its name, the share of its health left, and its bar's colour.
+    pub(crate) fn kaiju_boss(&self, feet: [f64; 3]) -> Option<(&'static str, f32, [f32; 3])> {
+        let away = |at: [f64; 3]| (at[0] - feet[0]).hypot(at[2] - feet[2]);
+        self.kaiju
+            .iter()
+            .filter(|k| k.death_ticks == 0)
+            .min_by(|a, b| away(a.feet).total_cmp(&away(b.feet)))
+            .map(|k| (k.species.name, k.health / k.max_health, k.species.boss_color))
     }
 
     /// Steps the client-side puffs, which settle on the scene's blocks.
@@ -640,7 +646,7 @@ impl Entities {
         let poppies = golem_render::append_iron_golems(&mut out.models, w.iron_golems().iter(), poses, atlas, light, partial);
         // Timed from when the kaiju's tick came, not by this side's tick clock.
         let kaiju_partial = (self.kaiju_since / TICK_SECONDS).clamp(0.0, 1.0) as f32;
-        godzilla_render::append_godzillas(&mut out.models, &mut out.translucent, &self.kaiju, &self.kaiju_previous, atlas, light, kaiju_partial, self.ticks as f32 + partial);
+        kaiju_render::append_kaiju(&mut out.models, &mut out.translucent, &self.kaiju, &self.kaiju_previous, atlas, light, kaiju_partial, self.ticks as f32 + partial);
         wolf_render::append_wolves(&mut out.models, w.wolves().iter(), poses, atlas, light, partial, w.game_time());
         flame_render::append_flames(
             &mut out.items,

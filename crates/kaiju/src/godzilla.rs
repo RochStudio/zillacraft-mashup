@@ -2,6 +2,7 @@
 //! whatever walks into him, and his atomic breath for whatever is in front of him.
 
 use crate::combat::{Segment, Stomp, Tail};
+use crate::species::Species;
 
 pub const HEIGHT: f64 = 50.0;
 /// His main column; follow-along boxes cover the rest of the body.
@@ -66,6 +67,46 @@ pub const STOMP: Stomp = Stomp {
 pub const TAIL_COOLDOWN: (u32, u32) = (160, 80);
 pub const STOMP_COOLDOWN: (u32, u32) = (120, 60);
 pub const MOVE_RECOVERY: u32 = 20;
+
+pub const SPECIES: Species = Species {
+    id: "zillacraft:godzilla",
+    name: "Godzilla",
+    voice: "godzilla",
+    height: HEIGHT,
+    width: WIDTH,
+    column_height: HEIGHT,
+    eye_height: breath::MOUTH_UP,
+    max_health: MAX_HEALTH,
+    armor: ARMOR,
+    toughness: 0.0,
+    speed: SPEED,
+    step_height: 6,
+    turn_rate: TURN_RATE,
+    follow_range: FOLLOW_RANGE,
+    claw_damage: CLAW_DAMAGE,
+    // His `ATTACK_KNOCKBACK` of 3, as `Mob.doHurtTarget` halves it.
+    claw_knockback: 1.5,
+    claw_reach: CLAW_REACH,
+    crush_budget: CRUSH_BUDGET,
+    crush_hardness: CRUSH_HARDNESS,
+    experience: XP as i32,
+    tail: TAIL,
+    stomp: STOMP,
+    bite: None,
+    roar_ticks: 0,
+    tail_cooldown: TAIL_COOLDOWN,
+    stomp_cooldown: STOMP_COOLDOWN,
+    bite_cooldown: (0, 0),
+    roar_cooldown: 0,
+    move_recovery: MOVE_RECOVERY,
+    breathes: true,
+    hitboxes: &crate::hitboxes::GODZILLA,
+    move_volume: 6.0,
+    move_pitch: 1.0,
+    voice_volume: 4.0,
+    // `BossEvent.BossBarColor.RED`.
+    boss_color: [0.85, 0.12, 0.12],
+};
 
 /// The atomic breath: a 2.25 s charge while his plates light up, then almost 4 s of heat ray.
 pub mod breath {

@@ -1,23 +1,21 @@
-//! ZillaCraft's Godzilla on the server: his brain (the `kaiju` crate) driving a body that walks
-//! the level the way a Minecraft mob does, crushing what he wades through, blasting the ground
-//! with his atomic breath, and hitting players through the same path as any mob.
+//! ZillaCraft's kaiju on the server (Godzilla and Zilla): each one's brain (the `kaiju` crate)
+//! driving a body that walks the level the way a Minecraft mob does, crushing what it wades
+//! through, Godzilla blasting the ground with his atomic breath, and hitting players through
+//! the same path as any mob.
 
+use kaiju::Species;
 use kaiju::anim::Move;
 use kaiju::brain::{Arena, Body, Brain, Cause, Effect, Seen, Walk};
-use kaiju::godzilla;
 use minecraftoss_core::BlockPos;
 use minecraftoss_entities::world::{MobSound, PlayerHit, PlayerHitKind};
 use minecraftoss_world::level::explosion::{BlockInteraction, Explosion};
 use minecraftoss_world::level::{update, Level};
 
-pub const GODZILLA: &str = "zillacraft:godzilla";
 /// IDs well clear of the entity world's.
 const FIRST_ID: u64 = 1 << 40;
 /// Minecraft's ground friction for a mob walking on stone or dirt, and gravity per tick.
 const GROUND_DRAG: f64 = 0.6 * 0.91;
 const GRAVITY: f64 = 0.08;
-/// He climbs rises this tall without stopping; anything taller he has to crush first.
-const STEP_HEIGHT: i32 = 6;
 const DEATH_TICKS: u32 = 60;
 /// After a player respawns, kaiju neither see nor hit it for this long (5 s), so it isn't
 /// killed again where it lands.
@@ -40,6 +38,7 @@ const HURT_COOLDOWN: u32 = 10;
 #[derive(Clone, Debug)]
 pub struct KaijuView {
     pub id: u64,
+    pub species: &'static Species,
     pub feet: [f64; 3],
     pub yaw: f32,
     pub head_yaw: f32,
@@ -93,8 +92,8 @@ struct Shown {
 pub struct KaijuTick {
     pub player_hits: Vec<PlayerHit>,
     pub sounds: Vec<MobSound>,
-    /// Where each one that died fell, for its drops.
-    pub deaths: Vec<[f64; 3]>,
+    /// Where each one that died fell, and what it was, for its drops.
+    pub deaths: Vec<([f64; 3], &'static Species)>,
 }
 
 /// A player as the kaiju see it.
@@ -121,12 +120,12 @@ pub struct KaijuWorld {
 }
 
 impl KaijuWorld {
-    /// A new kaiju; one summoned at a player (`aggro`) comes for it from any distance, unless
-    /// it is in creative mode.
-    pub fn spawn(&mut self, feet: [f64; 3], yaw: f32, aggro: Option<u64>) -> u64 {
+    /// A new kaiju of `species`; one summoned at a player (`aggro`) comes for it from any
+    /// distance, unless it is in creative mode.
+    pub fn spawn(&mut self, species: &'static Species, feet: [f64; 3], yaw: f32, aggro: Option<u64>) -> u64 {
         let id = FIRST_ID + self.next_id;
         self.next_id += 1;
-        let mut brain = Brain::new(id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ feet[0].to_bits());
+        let mut brain = Brain::new(id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ feet[0].to_bits(), species);
         if let Some(player) = aggro {
             brain.aggro(player);
         }
@@ -134,7 +133,7 @@ impl KaijuWorld {
             id,
             body: Body { feet, yaw, head_yaw: yaw, ..Body::default() },
             brain,
-            health: godzilla::MAX_HEALTH,
+            health: species.max_health,
             velocity: [0.0; 3],
             on_ground: false,
             walk_position: 0.0,
@@ -159,17 +158,17 @@ impl KaijuWorld {
         count
     }
 
-    /// A hit from `attacker` for `damage` Minecraft health, before his armor.
+    /// A hit from `attacker` for `damage` Minecraft health, before its armor.
     pub fn hurt(&mut self, id: u64, damage: f32, attacker: u64) {
         let Some(k) = self.list.iter_mut().find(|k| k.id == id && k.health > 0.0) else {
             return;
         };
-        // `CombatRules.getDamageAfterAbsorb` with his 12 armor and no toughness.
-        let armor = godzilla::ARMOR;
-        let soaked = (armor / 5.0).max(armor - damage / 2.0).min(20.0);
+        // `CombatRules.getDamageAfterAbsorb` with its armor and toughness.
+        let (armor, toughness) = (k.brain.species.armor, k.brain.species.toughness);
+        let soaked = (armor / 5.0).max(armor - damage / (2.0 + toughness / 4.0)).min(20.0);
         k.health -= damage * (1.0 - soaked / 25.0);
         k.hurt_ticks = 10;
-        // His hurt sound at most every half second, as vanilla's hurt cooldown allows one.
+        // Its hurt sound at most every half second, as vanilla's hurt cooldown allows one.
         if k.hurt_sound_ticks == 0 {
             k.hurt_sound = true;
             k.hurt_sound_ticks = HURT_COOLDOWN;
@@ -182,6 +181,7 @@ impl KaijuWorld {
             .iter()
             .map(|k| KaijuView {
                 id: k.id,
+                species: k.brain.species,
                 feet: k.body.feet,
                 yaw: k.body.yaw,
                 head_yaw: k.body.head_yaw - k.body.yaw,
@@ -194,7 +194,7 @@ impl KaijuWorld {
                 breath_ticks: k.brain.breath_ticks,
                 breath_amount: k.brain.breath_amount,
                 health: k.health.max(0.0),
-                max_health: godzilla::MAX_HEALTH,
+                max_health: k.brain.species.max_health,
                 death_ticks: k.death_ticks,
                 hurt_ticks: k.hurt_ticks,
                 beam: k.shown.beam,
@@ -209,13 +209,14 @@ impl KaijuWorld {
     pub fn boxes(views: &[KaijuView]) -> Vec<(u64, [f64; 6])> {
         let mut out = Vec::new();
         for v in views.iter().filter(|v| v.health > 0.0) {
+            let s = v.species;
             let tail_angle = match v.movement {
-                Move::TailSwipe => godzilla::TAIL.angle(f64::from(v.move_ticks), v.move_direction),
+                Move::TailSwipe => s.tail.angle(f64::from(v.move_ticks), v.move_direction),
                 _ => 0.0,
             };
-            let half = godzilla::WIDTH / 2.0;
-            out.push((v.id, [v.feet[0] - half, v.feet[1], v.feet[2] - half, v.feet[0] + half, v.feet[1] + godzilla::HEIGHT, v.feet[2] + half]));
-            for b in kaiju::hitboxes::world_boxes(&kaiju::hitboxes::GODZILLA, v.feet, v.yaw, &godzilla::TAIL, tail_angle) {
+            let half = s.width / 2.0;
+            out.push((v.id, [v.feet[0] - half, v.feet[1], v.feet[2] - half, v.feet[0] + half, v.feet[1] + s.column_height, v.feet[2] + half]));
+            for b in kaiju::hitboxes::world_boxes(s.hitboxes, v.feet, v.yaw, &s.tail, tail_angle) {
                 out.push((v.id, [b.min[0], b.min[1], b.min[2], b.max[0], b.max[1], b.max[2]]));
             }
         }
@@ -265,8 +266,9 @@ impl KaijuWorld {
         for k in &mut self.list {
             // Its target fell, or a player is respawning by it: it walks off, rather than wait
             // where they respawn.
+            let species = k.brain.species;
             let fell = fallen.iter().find(|(id, _)| k.brain.target == Some(*id)).map(|&(_, at)| at);
-            let near = |at: &[f64; 3]| (at[0] - k.body.feet[0]).hypot(at[2] - k.body.feet[2]) <= godzilla::FOLLOW_RANGE;
+            let near = |at: &[f64; 3]| (at[0] - k.body.feet[0]).hypot(at[2] - k.body.feet[2]) <= species.follow_range;
             let from = fell.or_else(|| respawning.iter().copied().find(near));
             if let Some(at) = from.filter(|_| k.health > 0.0) {
                 let (dx, dz) = (k.body.feet[0] - at[0], k.body.feet[2] - at[2]);
@@ -277,29 +279,31 @@ impl KaijuWorld {
                 };
                 let to = [k.body.feet[0] + dx * RETREAT_DISTANCE, k.body.feet[2] + dz * RETREAT_DISTANCE];
                 if !k.brain.retreating() {
-                    out.sounds.push(sound("roar", k.body.feet, 8.0, k.brain.voice_pitch()));
+                    let pitch = k.brain.voice_pitch();
+                    out.sounds.push(sound(species.voice, "roar", k.body.feet, species.move_volume * 1.5, pitch));
                 }
                 k.brain.retreat(to, RETREAT_TICKS);
             }
             k.hurt_ticks = k.hurt_ticks.saturating_sub(1);
             k.hurt_sound_ticks = k.hurt_sound_ticks.saturating_sub(1);
             if std::mem::take(&mut k.hurt_sound) && k.health > 0.0 {
-                out.sounds.push(sound("hurt", k.body.feet, 5.0, k.brain.voice_pitch()));
+                let pitch = k.brain.voice_pitch();
+                out.sounds.push(sound(species.voice, "hurt", k.body.feet, species.voice_volume * 1.25, pitch));
             }
             if k.health <= 0.0 {
                 if k.death_ticks == 0 {
-                    out.sounds.push(sound("death", k.body.feet, 6.0, 1.0));
+                    out.sounds.push(sound(species.voice, "death", k.body.feet, species.voice_volume * 1.5, 1.0));
                 }
                 k.death_ticks += 1;
                 if k.death_ticks == DEATH_TICKS {
-                    out.deaths.push(k.body.feet);
+                    out.deaths.push((k.body.feet, species));
                 }
                 k.shown = Shown::default();
                 continue;
             }
             let seen: Vec<Seen> = seen
                 .iter()
-                .map(|s| Seen { visible: has_line_of_sight(level, eye_of(&k.body), s.eyes()), ..*s })
+                .map(|s| Seen { visible: has_line_of_sight(level, eye_of(&k.body, species), s.eyes()), ..*s })
                 .collect();
             let mut walk = None;
             let mut effects = Vec::new();
@@ -313,7 +317,8 @@ impl KaijuWorld {
                 apply(k, effect, level, griefing, &mut out, &seen);
             }
             if k.brain.movement == Move::None && k.brain.breath_ticks == 0 && k.brain.chance(240) {
-                out.sounds.push(sound("ambient", k.body.feet, 4.0, k.brain.voice_pitch()));
+                let pitch = k.brain.voice_pitch();
+                out.sounds.push(sound(species.voice, "ambient", k.body.feet, species.voice_volume, pitch));
             }
         }
         self.list.retain(|k| k.death_ticks < DEATH_TICKS);
@@ -332,26 +337,27 @@ impl KaijuWorld {
         out
     }
 
-    /// Walks him a tick: Minecraft's mob ground movement, up rises of up to six blocks, falling
-    /// when there's nothing under him. He doesn't float: he wades along the bottom.
+    /// Walks it a tick: Minecraft's mob ground movement, up rises of up to its step height,
+    /// falling when there's nothing under it. It doesn't float: it wades along the bottom.
     fn step(k: &mut Kaiju, level: &Level<'static>, walk: Option<Walk>) {
+        let species = k.brain.species;
         let mut accel = [0.0, 0.0];
         if let Some(walk) = walk {
-            Brain::turn_towards(&mut k.body, walk.to);
+            k.brain.turn_towards(&mut k.body, walk.to);
             let yaw = f64::from(k.body.yaw).to_radians();
             // `Mob.setSpeed` feeds both the input and the friction-influenced speed.
-            let speed = godzilla::SPEED * walk.speed;
+            let speed = species.speed * walk.speed;
             accel = [-yaw.sin() * speed * speed, yaw.cos() * speed * speed];
         }
         k.velocity[0] = (k.velocity[0] + accel[0]) * GROUND_DRAG;
         k.velocity[2] = (k.velocity[2] + accel[1]) * GROUND_DRAG;
         let next = [k.body.feet[0] + k.velocity[0], k.body.feet[2] + k.velocity[2]];
         let here = k.body.feet[1].floor() as i32;
-        let ground = ground_top(level, next[0], next[1], here);
+        let ground = ground_top(level, next[0], next[1], here, species.step_height);
         k.body.blocked = false;
         match ground {
-            Some(top) if top - here > STEP_HEIGHT => {
-                // A cliff: he stands against it while the rampage crushes it.
+            Some(top) if top - here > species.step_height => {
+                // A cliff: it stands against it while the rampage crushes it.
                 k.velocity[0] = 0.0;
                 k.velocity[2] = 0.0;
                 k.body.blocked = true;
@@ -361,7 +367,7 @@ impl KaijuWorld {
                 k.body.feet[2] = next[1];
             }
         }
-        let ground = ground_top(level, k.body.feet[0], k.body.feet[2], here).map(f64::from);
+        let ground = ground_top(level, k.body.feet[0], k.body.feet[2], here, species.step_height).map(f64::from);
         match ground {
             Some(top) if top >= k.body.feet[1] - 0.001 => {
                 k.body.feet[1] = top;
@@ -408,16 +414,7 @@ fn apply(k: &mut Kaiju, effect: Effect, level: &mut Level<'static>, griefing: bo
                 out.player_hits.push(PlayerHit { player_id: target, damage, kind, source: Some(k.id) });
             }
         }
-        Effect::Sound { name, volume, pitch } => {
-            let (group, file) = name.split_once('/').unwrap_or(("godzilla", name));
-            out.sounds.push(MobSound {
-                event: format!("zillacraft:entity.{group}.{file}"),
-                position: glam_dvec(k.body.feet),
-                volume,
-                pitch,
-                category: "hostile",
-            });
-        }
+        Effect::Sound { group, file, volume, pitch } => out.sounds.push(sound(group, file, k.body.feet, volume, pitch)),
         Effect::Blast { at, power } => {
             let interaction = if griefing { BlockInteraction::DestroyWithDecay } else { BlockInteraction::Keep };
             level.explode(Explosion { center: at, radius: power, fire: true, interaction, source: None });
@@ -479,12 +476,12 @@ fn crush(level: &mut Level<'static>, min: [f64; 3], max: [f64; 3], mut budget: u
     }
 }
 
-/// The top of the highest solid block under (x, z) from `near` + the step height down to 64
+/// The top of the highest solid block under (x, z) from `near` + `step_height` down to 64
 /// blocks below, if there is one.
-fn ground_top(level: &Level<'static>, x: f64, z: f64, near: i32) -> Option<i32> {
+fn ground_top(level: &Level<'static>, x: f64, z: f64, near: i32, step_height: i32) -> Option<i32> {
     let (bx, bz) = (x.floor() as i32, z.floor() as i32);
     let floor = level.min_y();
-    let mut y = near + STEP_HEIGHT + 1;
+    let mut y = near + step_height + 1;
     while y >= (near - 64).max(floor) {
         if solid(level, BlockPos::new(bx, y, bz)) {
             return Some(y + 1);
@@ -500,8 +497,8 @@ fn solid(level: &Level<'static>, pos: BlockPos) -> bool {
     !blocks.is_air(state) && !blocks.has_fluid(state) && blocks.state(state).collision_full_block
 }
 
-fn eye_of(body: &Body) -> [f64; 3] {
-    [body.feet[0], body.feet[1] + godzilla::breath::MOUTH_UP, body.feet[2]]
+fn eye_of(body: &Body, species: &Species) -> [f64; 3] {
+    [body.feet[0], body.feet[1] + species.eye_height, body.feet[2]]
 }
 
 /// Kaiju see through foliage, not walls (the mod's rule): leaves don't block sight.
@@ -549,13 +546,15 @@ impl Arena for LevelArena<'_> {
     }
 
     fn surface_y(&self, x: f64, z: f64, near_y: f64) -> f64 {
-        ground_top(self.level, x, z, near_y.floor() as i32).map_or(near_y, f64::from)
+        // Warnings are drawn on the ground a few blocks above or below the kaiju's feet.
+        ground_top(self.level, x, z, near_y.floor() as i32, 6).map_or(near_y, f64::from)
     }
 }
 
-fn sound(file: &str, at: [f64; 3], volume: f32, pitch: f32) -> MobSound {
+/// `zillacraft:entity.<group>.<file>`: a kaiju's voice, or a sound all kaiju share.
+fn sound(group: &str, file: &str, at: [f64; 3], volume: f32, pitch: f32) -> MobSound {
     MobSound {
-        event: format!("zillacraft:entity.godzilla.{file}"),
+        event: format!("zillacraft:entity.{group}.{file}"),
         position: glam_dvec(at),
         volume,
         pitch,

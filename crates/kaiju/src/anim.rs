@@ -1,6 +1,7 @@
 //! Godzilla's animation: a heavy rolling gait, a swaying tail, his jaw opening for the atomic
 //! breath while his dorsal plates rise and light up from the tail tip to the neck, and the
-//! tail swipe and stomp.
+//! tail swipe and stomp. What every kaiju's animation reads ([`AnimState`]) is here too;
+//! Zilla's rig is in `zila_anim`.
 
 use crate::godzilla;
 use crate::model::{Model, PartPose};
@@ -16,6 +17,10 @@ pub enum Move {
     None,
     TailSwipe,
     Stomp,
+    /// Zilla's: it rears back, lunges and snaps, and flings what it catches aside.
+    Bite,
+    /// Zilla's, at whatever it first sets eyes on.
+    Roar,
 }
 
 /// Everything the animation reads, interpolated for the frame being drawn.
@@ -138,7 +143,7 @@ impl Rig {
         match s.movement {
             Move::TailSwipe => self.tail_swipe(&mut p, s.move_time, s.move_direction),
             Move::Stomp => self.stomp(&mut p, s.move_time, s.move_direction),
-            Move::None => {}
+            Move::Bite | Move::Roar | Move::None => {}
         }
 
         // The breath's charge: plates light up and rise one after another, tail tip first.
@@ -212,8 +217,8 @@ impl Rig {
     }
 }
 
-/// The scale that makes the model stand `godzilla::HEIGHT` blocks to the top of his head.
-pub fn model_scale(model: &Model) -> f32 {
+/// The scale that makes a model stand `height` blocks to the top of its head.
+pub fn model_scale(model: &Model, height: f64) -> f32 {
     let model_height = model.number("MODEL_HEIGHT").unwrap_or(148.65);
-    godzilla::HEIGHT as f32 * 16.0 / model_height
+    height as f32 * 16.0 / model_height
 }

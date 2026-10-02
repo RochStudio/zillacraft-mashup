@@ -1,6 +1,6 @@
-//! ZillaCraft's Godzilla: his model (converted from the mod's geometry) posed by the ported
-//! animation, his dorsal plates' blue glow and the atomic breath's beam while he breathes, and
-//! the red warnings on the ground before a tail swipe or a stomp.
+//! ZillaCraft's kaiju: Godzilla's and Zilla's models (converted from the mod's geometry) posed
+//! by the ported animations, Godzilla's dorsal plates' blue glow and the atomic breath's beam
+//! while he breathes, and the red warnings on the ground before a move.
 
 use crate::cow_render::entity_shade;
 use crate::kaiju_server::KaijuView;
@@ -10,21 +10,34 @@ use crate::pack::ResourceId;
 use glam::Vec3;
 use kaiju::anim::{AnimState, Rig, model_scale};
 use kaiju::model::{Mat34, Model, Quad, entity_transform};
+use kaiju::zila_anim::ZilaRig;
 use std::sync::OnceLock;
 
-struct Loaded {
+struct Loaded<R> {
     model: Model,
-    rig: Rig,
+    rig: R,
     scale: f32,
 }
 
-fn loaded() -> Option<&'static Loaded> {
-    static LOADED: OnceLock<Option<Loaded>> = OnceLock::new();
+fn godzilla() -> Option<&'static Loaded<Rig>> {
+    static LOADED: OnceLock<Option<Loaded<Rig>>> = OnceLock::new();
     LOADED
         .get_or_init(|| {
             let model = Model::parse(kaiju::GODZILLA_MODEL).ok()?;
             let rig = Rig::new(&model).ok()?;
-            let scale = model_scale(&model);
+            let scale = model_scale(&model, kaiju::godzilla::HEIGHT);
+            Some(Loaded { model, rig, scale })
+        })
+        .as_ref()
+}
+
+fn zilla() -> Option<&'static Loaded<ZilaRig>> {
+    static LOADED: OnceLock<Option<Loaded<ZilaRig>>> = OnceLock::new();
+    LOADED
+        .get_or_init(|| {
+            let model = Model::parse(kaiju::ZILA_MODEL).ok()?;
+            let rig = ZilaRig::new(&model).ok()?;
+            let scale = model_scale(&model, kaiju::zila::HEIGHT);
             Some(Loaded { model, rig, scale })
         })
         .as_ref()
@@ -70,15 +83,15 @@ fn shown(p: &KaijuView, v: &KaijuView, t: f32) -> KaijuView {
 
 /// Where the motion towards a newly arrived tick starts: what was on screen when it came,
 /// `t` of the way from `previous` to `current`. The server thread's ticks come a frame late
-/// or early, and starting from anywhere else jerks him back or ahead (his stride most).
+/// or early, and starting from anywhere else jerks a kaiju back or ahead (its stride most).
 pub fn blend(previous: &[KaijuView], current: &[KaijuView], t: f32) -> Vec<KaijuView> {
     current.iter().map(|v| shown(previous.iter().find(|p| p.id == v.id).unwrap_or(v), v, t)).collect()
 }
 
-/// Appends every Godzilla, `partial` of a tick from `previous` to `views`: the skin to
-/// `models`, the glow, beam and warnings to `translucent`.
+/// Appends every kaiju, `partial` of a tick from `previous` to `views`: the skin to `models`,
+/// Godzilla's glow and beam and every kaiju's warnings to `translucent`.
 #[allow(clippy::too_many_arguments)]
-pub fn append_godzillas(
+pub fn append_kaiju(
     models: &mut ChunkMesh,
     translucent: &mut ChunkMesh,
     views: &[KaijuView],
@@ -88,8 +101,6 @@ pub fn append_godzillas(
     partial: f32,
     age_ticks: f32,
 ) {
-    let Some(l) = loaded() else { return };
-    let Some(skin) = region(atlas, kaiju::pack::SKIN) else { return };
     let glow = region(atlas, kaiju::pack::GLOW);
     let beam = region(atlas, kaiju::pack::BEAM);
     let t = partial.clamp(0.0, 1.0);
@@ -109,25 +120,34 @@ pub fn append_godzillas(
             move_time: v.move_ticks as f32 + t,
             move_direction: v.move_direction,
         };
-        // He keels over as he dies, as every mob does (`setupRotations`: 90 degrees over a second).
+        let is_godzilla = v.species.id == kaiju::godzilla::SPECIES.id;
+        let posed = if is_godzilla {
+            godzilla().map(|l| (&l.model, l.rig.pose(&l.model, &state, false), l.scale, kaiju::pack::SKIN))
+        } else {
+            zilla().map(|l| (&l.model, l.rig.pose(&l.model, &state), l.scale, kaiju::pack::ZILA_SKIN))
+        };
+        let Some((model, pose, scale, skin)) = posed else { continue };
+        let Some(skin) = region(atlas, skin) else { continue };
+        // It keels over as it dies, as every mob does (`setupRotations`: 90 degrees over a second).
         let dying = if v.death_ticks > 0 { ((v.death_ticks as f32 + t - 1.0) / 20.0 * 1.6).sqrt().min(1.0) } else { 0.0 };
-        let mut transform = entity_transform(l.scale, yaw);
+        let mut transform = entity_transform(scale, yaw);
         if dying > 0.0 {
             let turn = Mat34::rotation_y((180.0 - yaw).to_radians());
             let back = Mat34::rotation_y((yaw - 180.0).to_radians());
             transform = turn.mul(&Mat34::rotation_zyx(dying * std::f32::consts::FRAC_PI_2, 0.0, 0.0)).mul(&back).mul(&transform);
         }
-        let probe = (feet[0].floor() as i32, (feet[1] + 30.0).floor() as i32, feet[2].floor() as i32);
+        // Lit as the air round its middle is.
+        let middle = feet[1] + v.species.height * 0.6;
+        let probe = (feet[0].floor() as i32, middle.floor() as i32, feet[2].floor() as i32);
         let (sky, block) = (f32::from(light.get(probe)), f32::from(light.get_block(probe)));
         let tint = if v.hurt_ticks > 0 || v.death_ticks > 0 { [1.0, 0.55, 0.55] } else { [1.0, 1.0, 1.0] };
 
         let mut quads: Vec<Quad> = Vec::new();
-        let pose = l.rig.pose(&l.model, &state, false);
-        l.model.mesh(&pose, &transform, &mut quads);
+        model.mesh(&pose, &transform, &mut quads);
         push_quads(models, &quads, feet, skin, tint, 1.0, sky, block, true);
 
-        if breathing && v.death_ticks == 0 {
-            if let Some(glow) = glow {
+        if breathing && v.death_ticks == 0 && is_godzilla {
+            if let (Some(glow), Some(l)) = (glow, godzilla()) {
                 let intensity = (state.breath_amount * 1.4).min(1.0);
                 let mut lit: Vec<Quad> = Vec::new();
                 let pose = l.rig.pose(&l.model, &state, true);

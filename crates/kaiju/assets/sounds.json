@@ -56,5 +56,37 @@
   "sounds": [
    "zillacraft:entity/kaiju/crush"
   ]
+ },
+ "entity.zila.ambient": {
+  "sounds": [
+   "zillacraft:entity/zila/ambient1",
+   "zillacraft:entity/zila/ambient2"
+  ]
+ },
+ "entity.zila.hurt": {
+  "sounds": [
+   "zillacraft:entity/zila/hurt1",
+   "zillacraft:entity/zila/hurt2"
+  ]
+ },
+ "entity.zila.death": {
+  "sounds": [
+   "zillacraft:entity/zila/death"
+  ]
+ },
+ "entity.zila.roar": {
+  "sounds": [
+   "zillacraft:entity/zila/roar"
+  ]
+ },
+ "entity.zila.growl": {
+  "sounds": [
+   "zillacraft:entity/zila/growl"
+  ]
+ },
+ "entity.kaiju.bite": {
+  "sounds": [
+   "zillacraft:entity/kaiju/bite"
+  ]
  }
 }
