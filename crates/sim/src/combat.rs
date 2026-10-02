@@ -1515,6 +1515,10 @@ fn fire_weapon_melee(
     };
     let mut best_frac = 1.0f32;
     let mut best_hit: Option<crate::bullet_collision::BulletTraceSegment> = None;
+    // The Minecraft world's mobs and kaiju in reach before any surface: the
+    // nearest one's key, and how far along the swing it is.
+    let mobs = world.publishes_snapshot() && crate::voxel::active();
+    let mut best_mob: Option<(u64, f32)> = None;
     let n = melee_trace_count(width, height);
     for (index, offset) in MELEE_TRACE_OFFSETS.iter().take(n).enumerate() {
         let end = melee_trace_end(origin, forward, right, up, range, width, height, *offset);
@@ -1552,6 +1556,22 @@ fn fire_weapon_melee(
                 "MOD_MELEE",
             );
         }
+        if mobs {
+            let surface = segments
+                .iter()
+                .find(|s| matches!(s.collider, None | Some(ColliderId::World { .. })))
+                .map_or(end, |s| s.end);
+            let swing = ((end[0] - origin[0]).powi(2)
+                + (end[1] - origin[1]).powi(2)
+                + (end[2] - origin[2]).powi(2))
+            .sqrt();
+            if swing > 0.0
+                && let Some((key, dist, _)) = crate::voxel::mob_on_segment(origin, surface)
+                && best_mob.is_none_or(|(_, frac)| dist / swing < frac)
+            {
+                best_mob = Some((key, dist / swing));
+            }
+        }
         let Some(segment) = segments.iter().find(|s| s.collider.is_some()) else {
             continue;
         };
@@ -1575,10 +1595,20 @@ fn fire_weapon_melee(
         best_frac = frac;
         best_hit = Some(*segment);
     }
+    // A mob or kaiju nearer than anything else the swing met takes the blow.
+    let mob = best_mob.filter(|&(_, frac)| frac < best_frac);
+    if let Some((key, _)) = mob {
+        crate::voxel::push_mob_shot(key, facts.melee_damage as f32, origin);
+    }
     let Some(segment) = best_hit else {
         return;
     };
     let amount = facts.melee_damage + (world.combat_rng_mut().next_u32() % 5) as i32;
+    // Rolled all the same, so the combat random sequence doesn't hang on the
+    // mobs, which only the authority sees.
+    if mob.is_some() {
+        return;
+    }
     if matches!(segment.collider, None | Some(ColliderId::World { .. }))
         && world.publishes_snapshot()
         && crate::voxel::active()

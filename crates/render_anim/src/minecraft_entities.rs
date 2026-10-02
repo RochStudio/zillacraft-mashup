@@ -3,9 +3,9 @@
 //! thread with natural spawning and the entity world, every passive and
 //! hostile mob's AI and pathfinding. Here it is fed the streamed chunks and
 //! the player, and hands back the tracked mobs, which are drawn with the
-//! viewer's mob renderers. MW2 bullets hurt the mobs with their real damage
-//! (a hundred MW2 health to Minecraft's twenty), and mobs hurt the player
-//! the other way round.
+//! viewer's mob renderers. MW2 bullets, blasts and the knife hurt the mobs
+//! with their real damage (a hundred MW2 health to Minecraft's twenty), and
+//! mobs hurt the player the other way round.
 use glam::{DVec3, Vec3};
 use minecraft_terrain::lighting::SkyLight;
 use minecraft_terrain::mesh::{Atlas, ChunkMesh};
@@ -342,8 +342,8 @@ impl Entities {
         }
     }
 
-    /// A bullet on a mob: an attack with the bullet's damage from where it
-    /// was fired.
+    /// A bullet, blast or knife on a mob: an attack with its damage from
+    /// where it came from.
     pub(crate) fn shoot(&mut self, key: u64, damage: f32, from: [f64; 3], yaw: f32) {
         if key >> 56 == KAIJU_KEY {
             self.server.kaiju_hurt(key & ((1 << 56) - 1), damage * HEALTH_SCALE, PLAYER);

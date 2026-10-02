@@ -72,6 +72,9 @@ struct Kaiju {
     walk_speed: f32,
     death_ticks: u32,
     hurt_ticks: u32,
+    /// A hit is waiting for his hurt sound, and ticks until another may have one.
+    hurt_sound: bool,
+    hurt_sound_ticks: u32,
     shown: Shown,
 }
 
@@ -138,6 +141,8 @@ impl KaijuWorld {
             walk_speed: 0.0,
             death_ticks: 0,
             hurt_ticks: 0,
+            hurt_sound: false,
+            hurt_sound_ticks: 0,
             shown: Shown::default(),
         });
         id
@@ -164,6 +169,11 @@ impl KaijuWorld {
         let soaked = (armor / 5.0).max(armor - damage / 2.0).min(20.0);
         k.health -= damage * (1.0 - soaked / 25.0);
         k.hurt_ticks = 10;
+        // His hurt sound at most every half second, as vanilla's hurt cooldown allows one.
+        if k.hurt_sound_ticks == 0 {
+            k.hurt_sound = true;
+            k.hurt_sound_ticks = HURT_COOLDOWN;
+        }
         k.brain.provoked_by(attacker);
     }
 
@@ -272,6 +282,10 @@ impl KaijuWorld {
                 k.brain.retreat(to, RETREAT_TICKS);
             }
             k.hurt_ticks = k.hurt_ticks.saturating_sub(1);
+            k.hurt_sound_ticks = k.hurt_sound_ticks.saturating_sub(1);
+            if std::mem::take(&mut k.hurt_sound) && k.health > 0.0 {
+                out.sounds.push(sound("hurt", k.body.feet, 5.0, k.brain.voice_pitch()));
+            }
             if k.health <= 0.0 {
                 if k.death_ticks == 0 {
                     out.sounds.push(sound("death", k.body.feet, 6.0, 1.0));

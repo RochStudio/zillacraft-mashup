@@ -100,6 +100,13 @@ pub(crate) fn apply_explosion_blast(world: &mut FrameWorld, tick: Tick, blast: &
     }
     if crate::voxel::active() {
         crate::voxel::push_explosion(blast.origin);
+        apply_block_world_blast(
+            blast.origin,
+            blast.radius,
+            blast.inner_damage,
+            blast.outer_damage,
+            |point| blast.contains(point),
+        );
     }
     let attempts = radius_player_attempts(world, blast);
     let glass = radius_glass_hits(world, blast);
@@ -151,6 +158,30 @@ pub(crate) fn apply_explosion_blast(world: &mut FrameWorld, tick: Tick, blast: &
             cone: blast.cone,
         },
     );
+}
+
+/// A blast's damage to the Minecraft world's mobs and kaiju, handed on as
+/// bullets' is: each takes what a player in the open at the nearest of its
+/// boxes would.
+fn apply_block_world_blast(
+    origin: [f32; 3],
+    radius: f32,
+    inner: f32,
+    outer: f32,
+    reaches: impl Fn([f32; 3]) -> bool,
+) {
+    if radius <= 0.0 {
+        return;
+    }
+    for (key, dist, nearest) in crate::voxel::mobs_in_radius(origin, radius) {
+        if !reaches(nearest) {
+            continue;
+        }
+        let amount = radius_damage_amount(inner, outer, radius, dist, 1.0);
+        if amount > 0 {
+            crate::voxel::push_mob_shot(key, amount as f32, origin);
+        }
+    }
 }
 
 /// Damage the Minecraft world's mobs dealt players this tick, as world
@@ -249,6 +280,9 @@ pub(crate) fn apply_script_blast(
                 cone: None,
             },
         );
+        if crate::voxel::active() {
+            apply_block_world_blast(blast.origin, blast.radius, blast.max, blast.min, |_| true);
+        }
     }
     for target in radius_player_candidates(world, blast.origin, blast.radius) {
         let Some(meta) = world.client_meta(target) else {

@@ -113,8 +113,8 @@ pub enum VoxelEvent {
     Shot { block: [i32; 3], damage: f32 },
     /// An explosion went off here, in blocks.
     Explosion { center: [f64; 3] },
-    /// A bullet struck the mob with this key, with the damage it would have
-    /// done at that range, from this block point.
+    /// A bullet, blast or knife struck the mob with this key, with the damage
+    /// it would have done a player there, from this block point.
     MobShot { key: u64, damage: f32, from: [f64; 3] },
     /// A bullet's path through the air, in blocks, up to what stopped it:
     /// blocks without collision on it (grass, flowers) take its damage.
@@ -205,6 +205,38 @@ pub(crate) fn mob_on_segment(start: [f32; 3], end: [f32; 3]) -> Option<(u64, f32
         ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2) + (end[2] - start[2]).powi(2)).sqrt(),
     );
     best.map(|(key, t, up)| (key, (t * length) as f32, up as f32))
+}
+
+/// The world's mobs within `radius` map units of map point `centre`: each
+/// mob's key once, with the distance to the nearest of its boxes and that
+/// nearest point, in map units.
+pub(crate) fn mobs_in_radius(centre: [f32; 3], radius: f32) -> Vec<(u64, f32, [f32; 3])> {
+    let Ok(world) = WORLD.read() else {
+        return Vec::new();
+    };
+    let Some(origin) = world.as_ref().map(|w| w.origin) else {
+        return Vec::new();
+    };
+    let Ok(boxes) = MOB_BOXES.read() else {
+        return Vec::new();
+    };
+    let c = to_block(origin, centre);
+    let mut nearest: Vec<(u64, f64, [f64; 3])> = Vec::new();
+    for &(key, bb) in boxes.iter() {
+        let p: [f64; 3] = std::array::from_fn(|k| c[k].max(bb[k]).min(bb[k + 3]));
+        let d = (0..3).map(|k| (p[k] - c[k]).powi(2)).sum::<f64>().sqrt();
+        match nearest.iter_mut().find(|(k, ..)| *k == key) {
+            Some(entry) if d < entry.1 => *entry = (key, d, p),
+            Some(_) => {}
+            None => nearest.push((key, d, p)),
+        }
+    }
+    let s = f64::from(BLOCK);
+    nearest
+        .into_iter()
+        .map(|(key, d, p)| (key, (d * s) as f32, to_map(origin, p)))
+        .filter(|&(_, d, _)| d < radius)
+        .collect()
 }
 
 /// A bullet's path from map point `start` to `end`.

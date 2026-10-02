@@ -835,6 +835,26 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
         }
         TraceOutcome::Miss { .. } | TraceOutcome::Invalid { .. } => None,
     };
+    // An armed impact round (a rocket, a launched grenade) bursts on a mob or
+    // kaiju of the Minecraft world in its path, before anything behind it;
+    // thrown grenades and the rest pass through them.
+    if world.publishes_snapshot()
+        && crate::voxel::active()
+        && facts.proj_impact_explode
+        && projectile.is_armed(facts.projectile_activate_dist)
+        && projectile.pos.tr_type != TR_STATIONARY
+    {
+        let reach = hit.map_or(end, |(at, ..)| at);
+        let length = vec3_length(core::array::from_fn(|i| end[i] - start[i]));
+        if length > 0.0
+            && let Some((_, dist, _)) = crate::voxel::mob_on_segment(start, reach)
+        {
+            let fraction = (dist / length).clamp(0.0, 1.0);
+            let at = core::array::from_fn(|i| start[i] + (end[i] - start[i]) * fraction);
+            let back = core::array::from_fn(|i| (start[i] - end[i]) / length);
+            hit = Some((at, back, None, fraction));
+        }
+    }
     let mut contact_origin = None;
     if facts.is_retrievable_knife()
         && let Some((end, normal, collider, _)) = hit
