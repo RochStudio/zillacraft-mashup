@@ -50,11 +50,15 @@ pub fn item_icon(packs: &PackStack, key: &str, icon_size: usize) -> Result<Optio
 }
 
 /// The icon of an item vanilla draws with a special renderer, for the kinds built here as
-/// the boxes that renderer draws: chests (on each kind's sheet) and banners (in each color).
-/// The model is the one shown outside any season or condition (a `select`'s fallback).
+/// the boxes that renderer draws: chests (on each kind's sheet), banners (in each color), and
+/// shulker boxes, heads, the conduit, the decorated pot, the shield and the copper golem
+/// statue (`special_model`). The model is the one shown outside any season or condition (a
+/// `select`'s fallback), placed by the transformations on the way down to it.
 fn special_icon(packs: &PackStack, model: &serde_json::Value, icon_size: usize) -> Result<Option<RgbaImage>> {
     let mut node = model;
+    let mut transform = glam::Mat4::IDENTITY;
     for _ in 0..8 {
+        transform *= crate::special_model::transformation(&node["transformation"])?;
         node = match node["type"].as_str() {
             Some("minecraft:special") => break,
             Some("minecraft:select" | "minecraft:range_dispatch") => &node["fallback"],
@@ -66,17 +70,20 @@ fn special_icon(packs: &PackStack, model: &serde_json::Value, icon_size: usize) 
         return Ok(None);
     };
     let special = &node["model"];
-    let (model, tints) = match special["type"].as_str() {
+    let (elements, tints) = match special["type"].as_str() {
         Some("minecraft:chest") => {
             let sheet = ResourceId::parse(special["texture"].as_str().unwrap_or("minecraft:normal"))?;
             let texture = ResourceId::parse(&format!("{}:entity/chest/{}", sheet.namespace, sheet.path))?;
-            (crate::model::chest_model(&texture, "single", "south"), Vec::new())
+            (crate::model::chest_model(&texture, "single", "south").elements, Vec::new())
         }
-        Some("minecraft:banner") => (banner_model()?, vec![dye_color(special["color"].as_str().unwrap_or("white"))]),
-        _ => return Ok(None),
+        Some("minecraft:banner") => (banner_model()?.elements, vec![dye_color(special["color"].as_str().unwrap_or("white"))]),
+        _ => match crate::special_model::special_elements(special, transform)? {
+            Some(elements) => (elements, Vec::new()),
+            None => return Ok(None),
+        },
     };
     let pose = crate::item_icon::GuiPose::of(packs, base)?;
-    crate::item_icon::elements_icon(packs, &model.elements, &tints, &pose, icon_size)
+    crate::item_icon::elements_icon(packs, &elements, &tints, &pose, icon_size)
 }
 
 /// The standing banner's boxes (`BannerModel`'s pole and bar, `BannerFlagModel`'s flag) as
@@ -301,4 +308,45 @@ fn model_texture(packs: &PackStack, model: &str) -> Result<Option<ResourceId>> {
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `MINECRAFTOSS_ROOT=<artifacts>/minecraft-26.3 cargo test -p minecraft_terrain --lib every_item -- --ignored`
+    #[test]
+    #[ignore = "needs the local resource pack"]
+    fn every_item_has_an_icon() {
+        let Ok(paths) = minecraftoss_core::registries::DataPaths::discover() else {
+            return;
+        };
+        let pack = paths
+            .datapack
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|root| root.join("resourcepacks/local/minecraft-26.3"));
+        let Some(pack) = pack.filter(|p| p.is_dir()) else {
+            eprintln!("skipping: local resource pack not restored");
+            return;
+        };
+        let packs = PackStack::open(vec![pack]).unwrap();
+        let mut missing = Vec::new();
+        for path in packs.list("minecraft", "items/").unwrap() {
+            let Some(name) = path.rsplit('/').next().and_then(|file| file.strip_suffix(".json")) else {
+                continue;
+            };
+            if name == "air" {
+                continue;
+            }
+            let key = format!("minecraft:{name}");
+            match item_icon(&packs, &key, 32) {
+                Ok(Some(icon)) if icon.pixels().any(|p| p[3] > 0) => {}
+                Ok(_) => missing.push(key),
+                Err(error) => missing.push(format!("{key} ({error:#})")),
+            }
+        }
+        assert!(missing.is_empty(), "{} items without an icon: {missing:?}", missing.len());
+    }
 }

@@ -2,7 +2,7 @@
 //! and GUI rotation/scale are read from the selected resource pack.
 use crate::pack::{PackStack, ResourceId};
 use anyhow::Result;
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 use image::RgbaImage;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -121,7 +121,7 @@ pub fn block_icon(
                     &mut output,
                     &mut depth,
                     &source,
-                    side,
+                    [side, side],
                     icon_size,
                     shade,
                     tint,
@@ -145,8 +145,8 @@ pub fn block_icon(
 /// An item model's `display.gui` pose, and whether it is lit from the front (`gui_light:
 /// front`: flat, unshaded).
 pub(crate) struct GuiPose {
-    x_angle: f32,
-    y_angle: f32,
+    /// `ItemTransform`'s rotation, `rotationXYZ` of its angles.
+    rotation: Mat3,
     scale: f32,
     /// In GUI pixels, x right and y up.
     translation: [f32; 2],
@@ -180,33 +180,31 @@ impl GuiPose {
                 .map(|v| v as f32)
         };
         Ok(Self {
-            x_angle: angle(rotation, 0).unwrap_or(30.0).to_radians(),
-            y_angle: angle(rotation, 1).unwrap_or(225.0).to_radians(),
+            rotation: Mat3::from_rotation_x(angle(rotation, 0).unwrap_or(30.0).to_radians())
+                * Mat3::from_rotation_y(angle(rotation, 1).unwrap_or(225.0).to_radians())
+                * Mat3::from_rotation_z(angle(rotation, 2).unwrap_or(0.0).to_radians()),
             scale: number("scale", 0).unwrap_or(0.625),
             translation: [number("translation", 0).unwrap_or(0.0), number("translation", 1).unwrap_or(0.0)],
             flat: light.as_deref() == Some("front"),
         })
     }
 
-    fn place(&self, [x, y, z]: Point3, icon_size: usize) -> Point3 {
-        let (sy, cy) = self.y_angle.sin_cos();
-        let (sx, cx) = self.x_angle.sin_cos();
-        let rotated_x = x * cy + z * sy;
-        let rotated_z = -x * sy + z * cy;
-        let rotated_y = y * cx - rotated_z * sx;
-        let depth = y * sx + rotated_z * cx;
+    fn place(&self, point: Point3, icon_size: usize) -> Point3 {
+        let turned = self.rotation * Vec3::from(point);
         let pixels_per_gui_unit = icon_size as f32 / 16.0;
         [
-            (8.0 + self.translation[0] + rotated_x * self.scale) * pixels_per_gui_unit,
-            (8.0 - (self.translation[1] + rotated_y * self.scale)) * pixels_per_gui_unit,
-            depth,
+            (8.0 + self.translation[0] + turned.x * self.scale) * pixels_per_gui_unit,
+            (8.0 - (self.translation[1] + turned.y * self.scale)) * pixels_per_gui_unit,
+            turned.z,
         ]
     }
 }
 
 /// An icon from resolved model boxes (block units, each face's texture and UVs as the
-/// world's meshes take them, unturned), posed for the GUI: the item models a special
-/// renderer draws in vanilla (chests, banners), built as the boxes those renderers draw.
+/// world's meshes take them, each box turned by its own rotation), posed for the GUI: the
+/// item models a special renderer draws in vanilla (chests, banners, shulker boxes, heads),
+/// built as the boxes those renderers draw. UVs are fractions of each texture's width and
+/// height.
 pub(crate) fn elements_icon(
     packs: &PackStack,
     elements: &[crate::model::Element],
@@ -219,8 +217,19 @@ pub(crate) fn elements_icon(
     let mut sheets = HashMap::<ResourceId, Option<RgbaImage>>::new();
     for element in elements {
         let (from, to) = (element.from.map(|v| v * 16.0), element.to.map(|v| v * 16.0));
+        let turn = element.rotation.map(|rotation| (rotation, Mat3::from_cols_array_2d(&rotation.matrix)));
         for (name, corners) in cuboid_faces(from, to) {
-            if !face_faces_camera(name, pose.x_angle, pose.y_angle) {
+            let normal = face_normal(name);
+            let (corners, normal) = match turn {
+                // About its origin in block units, between the pixel corners.
+                Some((rotation, matrix)) => (
+                    corners.map(|corner| rotation.apply(corner.map(|v| (v + 8.0) / 16.0)).map(|v| v * 16.0 - 8.0)),
+                    matrix * normal,
+                ),
+                None => (corners, normal),
+            };
+            let turned = pose.rotation * normal;
+            if turned.z <= 0.0 {
                 continue;
             }
             let Some(face) = element.faces.iter().find(|face| face.direction == name) else {
@@ -236,19 +245,18 @@ pub(crate) fn elements_icon(
             let Some(source) = sheets.get(&face.texture).and_then(Option::as_ref) else {
                 continue;
             };
-            let side = source.width().min(source.height());
-            if side == 0 {
+            if source.width() == 0 || source.height() == 0 {
                 continue;
             }
             let tint = face.tint_index.and_then(|index| tints.get(index)).copied().unwrap_or([255; 3]);
             let vertices = corners.map(|point| pose.place(point, icon_size));
-            let shade = if pose.flat { 1.0 } else { item_diffuse_light(name, pose.x_angle, pose.y_angle) };
+            let shade = if pose.flat { 1.0 } else { gui_diffuse_light(turned) };
             for triangle in [[0, 1, 2], [0, 2, 3]] {
                 raster_triangle(
                     &mut output,
                     &mut depth,
                     source,
-                    side,
+                    [source.width(), source.height()],
                     icon_size,
                     shade,
                     tint,
@@ -261,7 +269,23 @@ pub(crate) fn elements_icon(
     Ok(output.pixels().any(|pixel| pixel[3] > 0).then_some(output))
 }
 
+fn face_normal(face: &str) -> Vec3 {
+    match face {
+        "north" => -Vec3::Z,
+        "south" => Vec3::Z,
+        "east" => Vec3::X,
+        "west" => -Vec3::X,
+        "up" => Vec3::Y,
+        _ => -Vec3::Y,
+    }
+}
+
 fn item_diffuse_light(face: &str, x_angle: f32, y_angle: f32) -> f32 {
+    gui_diffuse_light(Mat3::from_rotation_x(x_angle) * Mat3::from_rotation_y(y_angle) * face_normal(face))
+}
+
+/// The GUI's item light on a face whose normal the display pose has turned to `normal`.
+fn gui_diffuse_light(normal: Vec3) -> f32 {
     // Lighting.Entry.ITEMS_3D and minecraft_mix_light in the pinned 26.3
     // Lighting.java / assets/minecraft/shaders/include/light.glsl.
     let light_pose = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0))
@@ -269,21 +293,9 @@ fn item_diffuse_light(face: &str, x_angle: f32, y_angle: f32) -> f32 {
         * Mat4::from_rotation_x(3.2375858)
         * Mat4::from_rotation_y(-std::f32::consts::PI / 8.0)
         * Mat4::from_rotation_x(std::f32::consts::PI * 3.0 / 4.0);
-    let normal = match face {
-        "north" => -Vec3::Z,
-        "south" => Vec3::Z,
-        "east" => Vec3::X,
-        "west" => -Vec3::X,
-        "up" => Vec3::Y,
-        _ => -Vec3::Y,
-    };
     // GuiItemAtlas scales the item pose by (size, -size, size) before the
     // model transform. That Y inversion also transforms the vertex normal.
-    let normal = (Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0))
-        * Mat4::from_rotation_x(x_angle)
-        * Mat4::from_rotation_y(y_angle))
-    .transform_vector3(normal)
-    .normalize();
+    let normal = (normal * Vec3::new(1.0, -1.0, 1.0)).normalize();
     let light0 = light_pose
         .transform_vector3(Vec3::new(0.2, 1.0, -0.7).normalize())
         .normalize();
@@ -294,17 +306,7 @@ fn item_diffuse_light(face: &str, x_angle: f32, y_angle: f32) -> f32 {
 }
 
 fn face_faces_camera(face: &str, x_angle: f32, y_angle: f32) -> bool {
-    let normal = match face {
-        "north" => -Vec3::Z,
-        "south" => Vec3::Z,
-        "east" => Vec3::X,
-        "west" => -Vec3::X,
-        "up" => Vec3::Y,
-        _ => -Vec3::Y,
-    };
-    let (sin_y, cos_y) = y_angle.sin_cos();
-    let rotated_z = -normal.x * sin_y + normal.z * cos_y;
-    normal.y * x_angle.sin() + rotated_z * x_angle.cos() > 0.0
+    (Mat3::from_rotation_x(x_angle) * Mat3::from_rotation_y(y_angle) * face_normal(face)).z > 0.0
 }
 
 fn angle(rotation: Option<&Value>, axis: usize) -> Option<f32> {
@@ -362,7 +364,9 @@ fn texture_id(raw: &str, textures: &HashMap<String, String>) -> Option<ResourceI
     None
 }
 
-fn cuboid_faces(from: Point3, to: Point3) -> [(&'static str, [Point3; 4]); 6] {
+/// Each face of a box (pixels) and its corners, centred on the block, in the order the raster
+/// takes a face's UVs: the first at `[u0, v0]`, the third at `[u1, v1]`.
+pub(crate) fn cuboid_faces(from: Point3, to: Point3) -> [(&'static str, [Point3; 4]); 6] {
     let [x, y, z] = from.map(|v| v - 8.0);
     let [xx, yy, zz] = to.map(|v| v - 8.0);
     [
@@ -403,11 +407,13 @@ fn uv(corner: usize, [u0, v0, u1, v1]: [f32; 4]) -> [f32; 2] {
     }
 }
 
+/// `size` is the texels a UV of 1 spans across and down: a block texture's first square
+/// frame, or an entity sheet's whole width and height.
 fn raster_triangle(
     output: &mut RgbaImage,
     depth: &mut [Vec<f32>],
     source: &RgbaImage,
-    side: u32,
+    size: [u32; 2],
     icon_size: usize,
     shade: f32,
     tint: [u8; 3],
@@ -462,8 +468,8 @@ fn raster_triangle(
             let u = a * uvs[0][0] + b * uvs[1][0] + c * uvs[2][0];
             let v = a * uvs[0][1] + b * uvs[1][1] + c * uvs[2][1];
             let texel = source.get_pixel(
-                ((u * side as f32) as u32).min(side - 1),
-                ((v * side as f32) as u32).min(side - 1),
+                ((u * size[0] as f32) as u32).min(size[0] - 1),
+                ((v * size[1] as f32) as u32).min(size[1] - 1),
             );
             if texel[3] == 0 {
                 continue;
