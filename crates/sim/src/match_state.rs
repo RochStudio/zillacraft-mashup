@@ -141,6 +141,10 @@ pub struct ClientMatchState {
     pub(crate) controls: ScriptControls,
 
     pub(crate) max_health: i32,
+
+    /// Creative mode, as the client's last command asked (`buttons::CREATIVE`): nothing hurts
+    /// it. Kept on the authority only.
+    pub(crate) creative: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

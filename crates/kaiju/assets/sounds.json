@@ -1,0 +1,60 @@
+{
+ "entity.godzilla.ambient": {
+  "sounds": [
+   "zillacraft:entity/godzilla/ambient1",
+   "zillacraft:entity/godzilla/ambient2"
+  ]
+ },
+ "entity.godzilla.hurt": {
+  "sounds": [
+   "zillacraft:entity/godzilla/hurt1",
+   "zillacraft:entity/godzilla/hurt2"
+  ]
+ },
+ "entity.godzilla.death": {
+  "sounds": [
+   "zillacraft:entity/godzilla/death"
+  ]
+ },
+ "entity.godzilla.roar": {
+  "sounds": [
+   "zillacraft:entity/godzilla/roar"
+  ]
+ },
+ "entity.godzilla.growl": {
+  "sounds": [
+   "zillacraft:entity/godzilla/growl"
+  ]
+ },
+ "entity.godzilla.breath_charge": {
+  "sounds": [
+   "zillacraft:entity/godzilla/breath_charge"
+  ]
+ },
+ "entity.godzilla.breath_fire": {
+  "sounds": [
+   "zillacraft:entity/godzilla/breath_fire"
+  ]
+ },
+ "entity.kaiju.step": {
+  "sounds": [
+   "zillacraft:entity/kaiju/step1",
+   "zillacraft:entity/kaiju/step2"
+  ]
+ },
+ "entity.kaiju.stomp": {
+  "sounds": [
+   "zillacraft:entity/kaiju/stomp"
+  ]
+ },
+ "entity.kaiju.tail_swipe": {
+  "sounds": [
+   "zillacraft:entity/kaiju/tail_swipe"
+  ]
+ },
+ "entity.kaiju.crush": {
+  "sounds": [
+   "zillacraft:entity/kaiju/crush"
+  ]
+ }
+}

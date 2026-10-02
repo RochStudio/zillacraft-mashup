@@ -92,7 +92,8 @@ pub fn complete_ground_trace<C: CollisionBackend>(
         pml.ground_plane = 1;
         pml.almost_ground_plane = 1;
         pml.walking = 1;
-        if ps.ground_entity_num == ENTITYNUM_NONE {
+        // Touching down from a flight is no fall.
+        if ps.ground_entity_num == ENTITYNUM_NONE && !crate::fly::flying(ps) {
             crate::crash_land(ps, pml);
         }
         let entity = trace_entity_id(&trace);

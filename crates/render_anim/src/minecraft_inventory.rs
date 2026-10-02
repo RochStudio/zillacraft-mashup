@@ -16,9 +16,13 @@ use minecraftoss_player::inventory::{Inventory, ItemStack};
 
 /// Items that are MW2 guns: `iw4:weapon/<weapon index>`.
 const WEAPON_PREFIX: &str = "iw4:weapon/";
-/// Icon cells: 32 pixels (a 16-pixel item at GUI scale 2), 16 to a row.
+/// Icon cells: 32 pixels (a 16-pixel item at GUI scale 2), 64 to a row and 32 rows, room
+/// for every item the creative screen lists.
 const ICON: u32 = 32;
-const ATLAS: u32 = ICON * 16;
+const ATLAS_W: u32 = ICON * 64;
+const ATLAS_H: u32 = ICON * 32;
+/// New icons drawn a frame for the creative screen, so scrolling to new rows doesn't hitch.
+const CREATIVE_ICONS_PER_FRAME: usize = 16;
 
 pub(crate) fn weapon_of(stack: &ItemStack) -> Option<u32> {
     stack.id.strip_prefix(WEAPON_PREFIX)?.parse().ok()
@@ -41,6 +45,10 @@ pub(crate) struct InventoryUi {
     /// The gun last asked for, until the player state holds it.
     pending_weapon: Option<u32>,
     last_selected: Option<usize>,
+    /// The creative screen's catalog, once it has opened, and the tab and search its items
+    /// were listed for.
+    catalog: Option<crate::minecraft_creative::Catalog>,
+    creative_query: Option<(usize, String)>,
 }
 
 /// What the player holds and where it looks, for throwing items.
@@ -95,6 +103,7 @@ impl InventoryUi {
         ui: &mut MinecraftUi,
         inventory: &mut Inventory,
         selected: &mut usize,
+        registries: &minecraftoss_core::registries::Registries,
     ) -> Vec<ItemStack> {
         let mut thrown = Vec::new();
         for click in std::mem::take(&mut ui.clicks) {
@@ -125,6 +134,11 @@ impl InventoryUi {
                         thrown.push(rest);
                     }
                 }
+                McClick::CreativeTake { id, right, shift } => {
+                    crate::minecraft_creative::take(inventory, registries, &id, right, shift, *selected);
+                }
+                McClick::CreativeHotbar { id, hotbar } => crate::minecraft_creative::to_hotbar(inventory, registries, &id, hotbar),
+                McClick::CreativeDestroy => crate::minecraft_creative::destroy_carried(inventory, *selected),
             }
         }
         thrown.extend(inventory.take_pending_drops());
@@ -217,43 +231,99 @@ impl InventoryUi {
         }
         ui.selected = selected;
         for id in stacks {
-            if id.starts_with(WEAPON_PREFIX) {
-                continue;
-            }
-            if !ui.names.contains_key(&id) {
-                ui.names.insert(id.clone(), minecraft_terrain::item_icons::item_name(language, &id));
-            }
-            if self.cells.contains_key(&id) || self.failed.contains(&id) {
-                continue;
-            }
-            let cell = self.cells.len() as u32;
-            if cell >= (ATLAS / ICON) * (ATLAS / ICON) {
-                continue;
-            }
-            match minecraft_terrain::item_icons::item_icon(packs, &id, ICON as usize) {
-                Ok(Some(icon)) => {
-                    let atlas = self.atlas.get_or_insert_with(|| image::RgbaImage::new(ATLAS, ATLAS));
-                    let (x, y) = ((cell % (ATLAS / ICON)) * ICON, (cell / (ATLAS / ICON)) * ICON);
-                    let icon = image::imageops::resize(&icon, ICON, ICON, image::imageops::FilterType::Nearest);
-                    image::imageops::replace(atlas, &icon, i64::from(x), i64::from(y));
-                    let size = ATLAS as f32;
-                    ui.icon_rects.insert(
-                        id.clone(),
-                        [x as f32 / size, y as f32 / size, (x + ICON) as f32 / size, (y + ICON) as f32 / size],
-                    );
-                    self.cells.insert(id, cell);
-                    self.dirty = true;
-                }
-                Ok(None) => {
-                    diag::warn!(World, "Minecraft item icon: no model for `{id}`");
-                    self.failed.insert(id);
-                }
-                Err(error) => {
-                    diag::warn!(World, "Minecraft item icon for `{id}` failed: {error}");
-                    self.failed.insert(id);
-                }
+            if !id.starts_with(WEAPON_PREFIX) {
+                self.icon(ui, &id, packs);
             }
         }
+        self.upload(ui, images);
+    }
+
+    /// Names an item and draws its icon into the atlas, unless done (or failed) before.
+    /// True if it drew one.
+    fn icon(&mut self, ui: &mut MinecraftUi, id: &str, packs: &PackStack) -> bool {
+        if !ui.names.contains_key(id) {
+            let language = self
+                .language
+                .get_or_insert_with(|| minecraft_terrain::item_icons::language(packs).unwrap_or_else(|_| HashMap::new()));
+            ui.names.insert(id.to_owned(), minecraft_terrain::item_icons::item_name(language, id));
+        }
+        if self.cells.contains_key(id) || self.failed.contains(id) {
+            return false;
+        }
+        let cell = self.cells.len() as u32;
+        if cell >= (ATLAS_W / ICON) * (ATLAS_H / ICON) {
+            return false;
+        }
+        match minecraft_terrain::item_icons::item_icon(packs, id, ICON as usize) {
+            Ok(Some(icon)) => {
+                let atlas = self.atlas.get_or_insert_with(|| image::RgbaImage::new(ATLAS_W, ATLAS_H));
+                let (x, y) = ((cell % (ATLAS_W / ICON)) * ICON, (cell / (ATLAS_W / ICON)) * ICON);
+                let icon = image::imageops::resize(&icon, ICON, ICON, image::imageops::FilterType::Nearest);
+                image::imageops::replace(atlas, &icon, i64::from(x), i64::from(y));
+                let (w, h) = (ATLAS_W as f32, ATLAS_H as f32);
+                ui.icon_rects.insert(id.to_owned(), [x as f32 / w, y as f32 / h, (x + ICON) as f32 / w, (y + ICON) as f32 / h]);
+                self.cells.insert(id.to_owned(), cell);
+                self.dirty = true;
+            }
+            Ok(None) => {
+                diag::warn!(World, "Minecraft item icon: no model for `{id}`");
+                self.failed.insert(id.to_owned());
+            }
+            Err(error) => {
+                diag::warn!(World, "Minecraft item icon for `{id}` failed: {error}");
+                self.failed.insert(id.to_owned());
+            }
+        }
+        true
+    }
+
+    /// The creative screen's list for its tab and search, and the names and icons of the tabs
+    /// and the rows in view (a few new icons a frame).
+    pub(crate) fn publish_creative(
+        &mut self,
+        ui: &mut MinecraftUi,
+        packs: &PackStack,
+        registries: &minecraftoss_core::registries::Registries,
+        images: &mut Assets<Image>,
+    ) {
+        if !(ui.creative && ui.inventory_open) {
+            return;
+        }
+        if self.catalog.is_none() {
+            let language = self
+                .language
+                .get_or_insert_with(|| minecraft_terrain::item_icons::language(packs).unwrap_or_else(|_| HashMap::new()));
+            self.catalog = Some(crate::minecraft_creative::Catalog::load(packs, registries, language));
+        }
+        let search = if ui.creative_tab == frame::minecraft_ui::CREATIVE_SEARCH { ui.creative_search.clone() } else { String::new() };
+        let query = (ui.creative_tab, search);
+        if self.creative_query.as_ref() != Some(&query)
+            && let Some(catalog) = self.catalog.as_ref()
+        {
+            ui.creative_items = catalog.items(query.0, &query.1);
+            self.creative_query = Some(query);
+        }
+        let shown = frame::minecraft_ui::CREATIVE_COLUMNS * frame::minecraft_ui::CREATIVE_ROWS;
+        let first = ui.creative_row * frame::minecraft_ui::CREATIVE_COLUMNS;
+        let wanted: Vec<String> = frame::minecraft_ui::CREATIVE_TABS
+            .iter()
+            .map(|(_, icon)| (*icon).to_owned())
+            .chain(ui.creative_items.iter().skip(first).take(shown).cloned())
+            .collect();
+        let mut drawn = 0;
+        for id in wanted {
+            if drawn >= CREATIVE_ICONS_PER_FRAME {
+                break;
+            }
+            if self.icon(ui, &id, packs) {
+                drawn += 1;
+            }
+        }
+        self.upload(ui, images);
+    }
+
+    /// The atlas to the GPU, when an icon went in.
+    fn upload(&mut self, ui: &mut MinecraftUi, images: &mut Assets<Image>) {
         if self.dirty
             && let Some(atlas) = self.atlas.as_ref()
         {
@@ -261,7 +331,7 @@ impl InventoryUi {
             let image = Image {
                 sampler: ImageSampler::nearest(),
                 ..Image::new(
-                    Extent3d { width: ATLAS, height: ATLAS, depth_or_array_layers: 1 },
+                    Extent3d { width: ATLAS_W, height: ATLAS_H, depth_or_array_layers: 1 },
                     TextureDimension::D2,
                     atlas.as_raw().clone(),
                     TextureFormat::Rgba8UnormSrgb,

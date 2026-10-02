@@ -90,6 +90,9 @@ struct HandState {
     /// Ticks until another placement while the button is held
     /// (`rightClickDelay`).
     place_delay: u32,
+    /// Ticks until a held button breaks another block in creative mode
+    /// (`destroyDelay`).
+    break_delay: u32,
 }
 
 /// The player's walk, for vanilla's step and fall sounds.
@@ -205,6 +208,8 @@ pub(crate) fn register(app: &mut App) {
     app.init_resource::<MinecraftWorldView>()
         .init_resource::<frame::MinecraftUi>()
         .init_resource::<frame::InventoryPuppet>()
+        .init_resource::<frame::KaijuSummons>()
+        .init_resource::<frame::Creative>()
         .insert_non_send(Runtime::default())
         .add_systems(
             Update,
@@ -218,8 +223,13 @@ fn load(seed: i64) -> Result<Loaded, String> {
     let root = assets::minecraft_map::root().ok_or_else(assets::minecraft_setup::status)?;
     let paths = DataPaths::under(&root);
     let registries = Arc::new(Registries::load(&paths)?);
-    let packs = PackStack::open(vec![root.join("resourcepacks/local/minecraft-26.3")])
-        .map_err(|e| e.to_string())?;
+    // ZillaCraft's pack (Godzilla's textures and sounds) loads beside Minecraft's own.
+    let mut sources = vec![root.join("resourcepacks/local/minecraft-26.3")];
+    match kaiju::pack::install(&root.join("resourcepacks/local/zillacraft")) {
+        Ok(pack) => sources.push(pack),
+        Err(error) => diag::warn!(World, "ZillaCraft pack unavailable: {error}"),
+    }
+    let packs = PackStack::open(sources).map_err(|e| e.to_string())?;
     let stream = TerrainStream::for_dimension(
         registries.clone(),
         seed,
@@ -314,11 +324,13 @@ fn update(
     ),
     mut view: ResMut<MinecraftWorldView>,
     mut runtime: NonSendMut<Runtime>,
-    (skate, cameras, gamepads, active_pad): (
+    (skate, cameras, gamepads, active_pad, mut kaiju_summons, mut creative): (
         Res<frame::SkateMode>,
         Query<&Transform, With<render_scene::FlyCamera>>,
         Query<&bevy::input::gamepad::Gamepad>,
         Option<Res<frame::ActivePad>>,
+        ResMut<frame::KaijuSummons>,
+        ResMut<frame::Creative>,
     ),
 ) {
     let pad = active_pad.and_then(|active| active.0).and_then(|entity| gamepads.get(entity).ok());
@@ -423,6 +435,10 @@ fn update(
         ui.active = false;
         ui.inventory_open = false;
         puppet.active = false;
+        let creative = &mut *creative;
+        for (item, _) in creative.gives.drain(..) {
+            creative.replies.push(format!("give: {item} is a Minecraft item - on the Minecraft map only"));
+        }
         return;
     };
     let Some(ps) = presented.player(local.0) else {
@@ -600,11 +616,27 @@ fn update(
             let (yaw, pitch) = (f64::from(mc_yaw).to_radians(), f64::from(ps.viewangles[0]).to_radians());
             glam::DVec3::new(-yaw.sin() * pitch.cos(), -pitch.sin(), yaw.cos() * pitch.cos())
         };
-        if buttons.just_pressed(MouseButton::Left) || pad_trigger(pad, GamepadButton::RightTrigger2, true) {
+        let press = buttons.just_pressed(MouseButton::Left) || pad_trigger(pad, GamepadButton::RightTrigger2, true);
+        let held = buttons.pressed(MouseButton::Left) || pad_trigger(pad, GamepadButton::RightTrigger2, false);
+        if press {
             hand.swing = Some(0.0);
             entities.punch(eye_block, look, mc_yaw);
         }
-        if buttons.pressed(MouseButton::Left) || pad_trigger(pad, GamepadButton::RightTrigger2, false) {
+        if creative.on {
+            // Creative breaks the block in sight at once, and another every
+            // five ticks while held.
+            hand.break_delay = hand.break_delay.saturating_sub(hand_ticks);
+            if press || (held && hand.break_delay == 0) {
+                if let Some(hit) = player.target(&world.scene, 5.0) {
+                    all_events.push(sim::voxel::VoxelEvent::Shot {
+                        block: [hit.pos.0, hit.pos.1, hit.pos.2],
+                        damage: f32::INFINITY,
+                    });
+                    hand.swing = Some(0.0);
+                }
+                hand.break_delay = 5;
+            }
+        } else if held {
             for _ in 0..hand_ticks {
                 if let Some(hit) = player.target(&world.scene, 4.5) {
                     // A hand mines as vanilla's `getDestroyProgress`: a
@@ -624,11 +656,12 @@ fn update(
             || ((buttons.pressed(MouseButton::Right) || pad_trigger(pad, GamepadButton::LeftTrigger2, false)) && hand.place_delay == 0);
         if place {
             hand.place_delay = 4;
-            if let Some(pos) = player.place_selected(
-                &mut world.scene,
-                &mut entities.inventory,
-                minecraftoss_player::GameMode::Survival,
-            ) {
+            let mode = if creative.on {
+                minecraftoss_player::GameMode::Creative
+            } else {
+                minecraftoss_player::GameMode::Survival
+            };
+            if let Some(pos) = player.place_selected(&mut world.scene, &mut entities.inventory, mode) {
                 // Not into the player's own box.
                 let [fx, fy, fz] = feet;
                 let inside = (fx - 0.3) < f64::from(pos.0 + 1)
@@ -638,9 +671,12 @@ fn update(
                     && (fz - 0.3) < f64::from(pos.2 + 1)
                     && (fz + 0.3) > f64::from(pos.2);
                 let block = minecraft_terrain::scene::Scene::block(&world.scene, pos).cloned();
-                if inside {
+                // An item that is no block (a diamond) places nothing.
+                let no_block = block.as_ref().is_none_or(|b| world.stream.states.state_of(b).is_none());
+                if inside || no_block {
                     world.scene.set(pos, None);
-                    if let Some(block) = block {
+                    // Creative used nothing up, so nothing goes back.
+                    if let Some(block) = block.filter(|_| !creative.on) {
                         let _ = entities.inventory.add_item(
                             minecraftoss_player::inventory::ItemStack::new(block.id.key(), 1),
                             entities.selected,
@@ -741,7 +777,10 @@ fn update(
     if let Some(entities) = entities.as_mut() {
         let positions: Vec<_> = broken.iter().map(|(pos, ..)| *pos).collect();
         entities.broke(&world.scene, &positions);
-        entities.drop_blocks(&broken);
+        // Nothing broken in creative drops.
+        if !creative.on {
+            entities.drop_blocks(&broken);
+        }
     }
 
     let eye = sim::voxel::to_block(origin, [ps.origin[0], ps.origin[1], ps.origin[2] + ps.view_height_current]);
@@ -804,6 +843,7 @@ fn update(
 
     // The mobs: a server tick when due, the blocks it changed, its hits on
     // the player, the mobs' boxes for bullets and their meshes.
+    kaiju_summons.boss = None;
     if let Some(entities) = entities.as_mut() {
         let player = crate::minecraft_entities::PlayerView {
             feet,
@@ -811,10 +851,15 @@ fn update(
             health: ps.health as f32,
             yaw: mc_yaw,
             pitch: ps.viewangles[0],
+            creative: creative.on,
         };
+        for (kind, distance) in kaiju_summons.pending.drain(..) {
+            entities.summon_kaiju(&kind, feet, mc_yaw, distance);
+        }
         let bright_outside = world.environment.sky_light_level() > 11.0;
         let ticks_before = entities.client_ticks();
         let (changes, hits) = entities.tick(dt, day.ticks as i64, bright_outside, &player);
+        kaiju_summons.boss = entities.kaiju_health().map(|(health, max)| ("Godzilla".to_owned(), health / max));
         let mob_ticks = (entities.client_ticks() - ticks_before) as u32;
         if !changes.is_empty() {
             let blocks = &world.registries.blocks;
@@ -856,12 +901,47 @@ fn update(
             .filter(|&w| authority.0.weapon_combat_row(w).is_some_and(|facts| facts.inventory_type == 0))
             .collect();
         ui.active = alive;
+        ui.creative = creative.on;
         if !alive {
             ui.inventory_open = false;
         }
         inventory_ui.sync_weapons(&mut entities.inventory, &owned);
+        let creative = &mut *creative;
+        for (item, count) in creative.gives.drain(..) {
+            let reply = crate::minecraft_creative::give(
+                &mut entities.inventory,
+                entities.selected,
+                &world.packs,
+                &world.registries,
+                &item,
+                count,
+            );
+            creative.replies.push(reply);
+        }
+        // Creative's middle click: the block in sight onto the hotbar.
+        if creative.on
+            && alive
+            && !ui.inventory_open
+            && buttons.just_pressed(MouseButton::Middle)
+        {
+            let mut picker = minecraftoss_player::Player::new(glam::DVec3::from_array(feet));
+            picker.yaw = f64::from(mc_yaw);
+            picker.pitch = f64::from(ps.viewangles[0]);
+            if let Some(hit) = picker.target(&world.scene, 5.0)
+                && let Some(block) = minecraft_terrain::scene::Scene::block(&world.scene, hit.pos)
+                && let Some(slot) = crate::minecraft_creative::pick_block(
+                    &mut entities.inventory,
+                    entities.selected,
+                    &world.packs,
+                    &world.registries,
+                    &block.id.key(),
+                )
+            {
+                ui.select = Some(slot);
+            }
+        }
         let mut selected = entities.selected;
-        let thrown = inventory_ui.apply_input(&mut ui, &mut entities.inventory, &mut selected);
+        let thrown = inventory_ui.apply_input(&mut ui, &mut entities.inventory, &mut selected, &world.registries);
         let thrower = crate::minecraft_inventory::Thrower {
             eye: glam::DVec3::from_array(eye),
             yaw: mc_yaw,
@@ -871,6 +951,7 @@ fn update(
         ui.weapon_request = inventory_ui.weapon_request(&entities.inventory, &mut selected, ps.weapon as u32);
         entities.selected = selected;
         inventory_ui.publish(&mut ui, &entities.inventory, selected, &world.packs, &mut images);
+        inventory_ui.publish_creative(&mut ui, &world.packs, &world.registries, &mut images);
 
         if let Some(sounds) = sounds.as_mut() {
             for (event, position, volume, pitch) in std::mem::take(&mut entities.sounds) {

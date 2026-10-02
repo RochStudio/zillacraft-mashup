@@ -787,7 +787,7 @@ pub(crate) fn constrain_cmd(
     if controls.frozen {
         cmd.forwardmove = 0;
         cmd.rightmove = 0;
-        cmd.buttons &= buttons::PRONE | buttons::CROUCH | buttons::STANCE_HELD;
+        cmd.buttons &= buttons::PRONE | buttons::CROUCH | buttons::STANCE_HELD | buttons::CREATIVE;
     }
     if controls.linked {
         cmd.forwardmove = 0;

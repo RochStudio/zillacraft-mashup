@@ -15,8 +15,54 @@ use crate::{
 pub(crate) struct ShowposHud;
 #[derive(Component)]
 pub(crate) struct SkateHud;
+#[derive(Component)]
+pub(crate) struct BossBar;
+#[derive(Component)]
+pub(crate) struct BossBarFill;
+#[derive(Component)]
+pub(crate) struct BossBarName;
 
 pub(crate) fn spawn_showpos_hud(commands: &mut Commands, font: Handle<Font>) {
+    // A kaiju's boss bar, as Minecraft draws one: its name over a red bar, top centre.
+    commands
+        .spawn((
+            BossBar,
+            UiLayer::Overlay,
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(14),
+                left: percent(30),
+                width: percent(40),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: px(4),
+                ..default()
+            },
+            GlobalZIndex(19_000),
+        ))
+        .with_children(|bar| {
+            bar.spawn((
+                BossBarName,
+                Text::new(""),
+                TextFont { font: font.clone().into(), font_size: FontSize::Px(22.0), ..default() },
+                TextColor(Color::WHITE),
+                TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
+                Node { padding: UiRect::axes(px(10), px(2)), ..default() },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
+            ));
+            bar.spawn((
+                Node { width: percent(100), height: px(10), ..default() },
+                BackgroundColor(Color::srgba(0.12, 0.02, 0.02, 0.85)),
+            ))
+            .with_children(|track| {
+                track.spawn((
+                    BossBarFill,
+                    Node { width: percent(100), height: percent(100), ..default() },
+                    BackgroundColor(Color::srgb(0.85, 0.12, 0.12)),
+                ));
+            });
+        });
     commands.spawn((SkateHud, UiLayer::Overlay, Visibility::Hidden,
         Node { position_type: PositionType::Absolute, bottom:px(24), left:px(24),padding:UiRect::all(px(8)), ..default() },
         BackgroundColor(Color::srgba(0.02,0.03,0.04,0.7)),GlobalZIndex(19000),Text::new(""),
@@ -47,6 +93,8 @@ pub(crate) fn spawn_showpos_hud(commands: &mut Commands, font: Handle<Font>) {
 
 pub(crate) fn register_debug_move_commands(registry: &mut ConsoleRegistry) {
     registry.register(crate::CommandSpec::new("skate").usage("skate [on|off|status] - local Skate gameplay (J toggles)"));
+    registry.register(crate::CommandSpec::new("kaiju").usage("kaiju godzilla [distance] | kaiju clear - ZillaCraft's Godzilla drops in that far in front of you (Minecraft map; default 60), or every kaiju goes"));
+    registry.register(crate::CommandSpec::new("creative").usage("creative [on|off] - creative mode: double-tap jump to fly, nothing hurts you; on the Minecraft map blocks break at once, drop nothing and never run out, and middle click picks one"));
     if registry.resolve("showpos").is_none() {
         registry.register(
             crate::CommandSpec::new("showpos")
@@ -117,6 +165,8 @@ pub(crate) fn route_debug_move_commands(
     mut seq: ResMut<net::ActionRequestIds>,
     mut look: ResMut<LookState>,
     mut dispatch: ResMut<ConsoleDispatch>,
+    mut kaiju: Option<ResMut<frame::KaijuSummons>>,
+    mut creative: Option<ResMut<frame::Creative>>,
 ) {
     let capacity = settings.log_capacity;
     let echo = |msg: String, console: &mut ConsoleState, line: &mut ConsoleLine| {
@@ -124,6 +174,12 @@ pub(crate) fn route_debug_move_commands(
         line.0 = msg.clone();
         console.echo(msg, capacity);
     };
+    // The Minecraft inventory's answers to `give`.
+    if let Some(creative) = creative.as_deref_mut() {
+        for reply in std::mem::take(&mut creative.replies) {
+            echo(reply, &mut console, &mut line);
+        }
+    }
 
     for cmd in events.read() {
         match cmd.name.as_str() {
@@ -138,6 +194,44 @@ pub(crate) fn route_debug_move_commands(
                 echo(format!("skate active={} ready={} controller={:?} tick={} {}",skate.active,skate.preloaded,skate.controller,skate.tick,skate.status),&mut console,&mut line);
             }
 
+            "kaiju" => match (cmd.args.first().map(String::as_str), kaiju.as_deref_mut()) {
+                (Some("godzilla"), Some(summons)) => {
+                    let distance = cmd.args.get(1).and_then(|d| d.parse::<f64>().ok()).unwrap_or(60.0).clamp(20.0, 200.0);
+                    summons.pending.push(("godzilla".to_owned(), distance));
+                    echo(format!("kaiju: Godzilla is coming, {distance:.0} blocks out"), &mut console, &mut line);
+                }
+                (Some("clear"), Some(summons)) => {
+                    summons.pending.push(("clear".to_owned(), 0.0));
+                    echo("kaiju: cleared".into(), &mut console, &mut line);
+                }
+                (Some("godzilla" | "clear"), None) => echo("kaiju: only on the Minecraft map".into(), &mut console, &mut line),
+                _ => echo("usage: kaiju godzilla [distance] | kaiju clear".into(), &mut console, &mut line),
+            },
+            "creative" => {
+                let Some(creative) = creative.as_deref_mut() else {
+                    echo("creative: unavailable here".into(), &mut console, &mut line);
+                    continue;
+                };
+                if authority.as_ref().is_some_and(|a| !a.0.cheats_enabled()) {
+                    echo("creative: cheats are off".into(), &mut console, &mut line);
+                    continue;
+                }
+                creative.on = match cmd.args.first().map(String::as_str) {
+                    None => !creative.on,
+                    Some("on" | "1") => true,
+                    Some("off" | "0") => false,
+                    Some(_) => {
+                        echo("usage: creative [on|off]".into(), &mut console, &mut line);
+                        continue;
+                    }
+                };
+                let msg = if creative.on {
+                    "creative: on - double-tap jump to fly (jump rises, crouch or Ctrl sinks, sprint is faster); nothing can hurt you"
+                } else {
+                    "creative: off"
+                };
+                echo(msg.into(), &mut console, &mut line);
+            }
             "showpos" | "debug_pos" => match cmd.args.first().map(String::as_str) {
                 None => {
                     debug_pos.0 = true;
@@ -809,6 +903,28 @@ fn parse_force_spawn(args: &[String]) -> Result<SpawnPick, String> {
             yaw: args.get(4).map(num).transpose()?.unwrap_or(0.0),
         }),
         Some(_) => Err(USAGE.into()),
+    }
+}
+
+pub(crate) fn update_boss_bar(
+    summons: Option<Res<frame::KaijuSummons>>,
+    mut bar: Query<&mut Visibility, With<BossBar>>,
+    mut fill: Query<&mut Node, With<BossBarFill>>,
+    mut name: Query<&mut Text, With<BossBarName>>,
+) {
+    let boss = summons.as_ref().and_then(|s| s.boss.clone());
+    for mut visibility in &mut bar {
+        *visibility = if boss.is_some() { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if let Some((label, left)) = boss {
+        for mut node in &mut fill {
+            node.width = percent(left.clamp(0.0, 1.0) * 100.0);
+        }
+        for mut text in &mut name {
+            if text.0 != label {
+                text.0 = label.clone();
+            }
+        }
     }
 }
 

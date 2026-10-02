@@ -1,0 +1,228 @@
+//! ZillaCraft's Godzilla: his model (converted from the mod's geometry) posed by the ported
+//! animation, his dorsal plates' blue glow and the atomic breath's beam while he breathes, and
+//! the red warnings on the ground before a tail swipe or a stomp.
+
+use crate::cow_render::entity_shade;
+use crate::kaiju_server::KaijuView;
+use crate::lighting::SkyLight;
+use crate::mesh::{Atlas, ChunkMesh, Vertex};
+use crate::pack::ResourceId;
+use glam::Vec3;
+use kaiju::anim::{AnimState, Rig, model_scale};
+use kaiju::model::{Mat34, Model, Quad, entity_transform};
+use std::sync::OnceLock;
+
+struct Loaded {
+    model: Model,
+    rig: Rig,
+    scale: f32,
+}
+
+fn loaded() -> Option<&'static Loaded> {
+    static LOADED: OnceLock<Option<Loaded>> = OnceLock::new();
+    LOADED
+        .get_or_init(|| {
+            let model = Model::parse(kaiju::GODZILLA_MODEL).ok()?;
+            let rig = Rig::new(&model).ok()?;
+            let scale = model_scale(&model);
+            Some(Loaded { model, rig, scale })
+        })
+        .as_ref()
+}
+
+fn region(atlas: &Atlas, id: &str) -> Option<[f32; 4]> {
+    let id = ResourceId::parse(id).ok()?;
+    atlas.contains(&id).then(|| atlas.entity_region(&id))
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn lerp_degrees(a: f32, b: f32, t: f32) -> f32 {
+    let mut d = (b - a) % 360.0;
+    if d > 180.0 {
+        d -= 360.0;
+    } else if d < -180.0 {
+        d += 360.0;
+    }
+    a + d * t
+}
+
+/// What is on screen `t` of a tick from `p` to `v`.
+fn shown(p: &KaijuView, v: &KaijuView, t: f32) -> KaijuView {
+    let feet = if (v.feet[0] - p.feet[0]).abs() > 8.0 {
+        v.feet
+    } else {
+        std::array::from_fn(|i| p.feet[i] + (v.feet[i] - p.feet[i]) * f64::from(t))
+    };
+    KaijuView {
+        feet,
+        yaw: lerp_degrees(p.yaw, v.yaw, t),
+        head_yaw: lerp(p.head_yaw, v.head_yaw, t),
+        head_pitch: lerp(p.head_pitch, v.head_pitch, t),
+        walk_position: lerp(p.walk_position, v.walk_position, t),
+        walk_speed: lerp(p.walk_speed, v.walk_speed, t),
+        breath_amount: lerp(p.breath_amount, v.breath_amount, t),
+        ..v.clone()
+    }
+}
+
+/// Where the motion towards a newly arrived tick starts: what was on screen when it came,
+/// `t` of the way from `previous` to `current`. The server thread's ticks come a frame late
+/// or early, and starting from anywhere else jerks him back or ahead (his stride most).
+pub fn blend(previous: &[KaijuView], current: &[KaijuView], t: f32) -> Vec<KaijuView> {
+    current.iter().map(|v| shown(previous.iter().find(|p| p.id == v.id).unwrap_or(v), v, t)).collect()
+}
+
+/// Appends every Godzilla, `partial` of a tick from `previous` to `views`: the skin to
+/// `models`, the glow, beam and warnings to `translucent`.
+#[allow(clippy::too_many_arguments)]
+pub fn append_godzillas(
+    models: &mut ChunkMesh,
+    translucent: &mut ChunkMesh,
+    views: &[KaijuView],
+    previous: &[KaijuView],
+    atlas: &Atlas,
+    light: &SkyLight,
+    partial: f32,
+    age_ticks: f32,
+) {
+    let Some(l) = loaded() else { return };
+    let Some(skin) = region(atlas, kaiju::pack::SKIN) else { return };
+    let glow = region(atlas, kaiju::pack::GLOW);
+    let beam = region(atlas, kaiju::pack::BEAM);
+    let t = partial.clamp(0.0, 1.0);
+    for v in views {
+        let s = shown(previous.iter().find(|q| q.id == v.id).unwrap_or(v), v, t);
+        let (feet, yaw) = (s.feet, s.yaw);
+        let breathing = v.breath_ticks > 0;
+        let state = AnimState {
+            walk_position: s.walk_position,
+            walk_speed: s.walk_speed,
+            age_ticks,
+            head_yaw: s.head_yaw,
+            head_pitch: s.head_pitch,
+            breath_amount: s.breath_amount,
+            breath_time: if breathing { v.breath_ticks as f32 + t } else { 0.0 },
+            movement: v.movement,
+            move_time: v.move_ticks as f32 + t,
+            move_direction: v.move_direction,
+        };
+        // He keels over as he dies, as every mob does (`setupRotations`: 90 degrees over a second).
+        let dying = if v.death_ticks > 0 { ((v.death_ticks as f32 + t - 1.0) / 20.0 * 1.6).sqrt().min(1.0) } else { 0.0 };
+        let mut transform = entity_transform(l.scale, yaw);
+        if dying > 0.0 {
+            let turn = Mat34::rotation_y((180.0 - yaw).to_radians());
+            let back = Mat34::rotation_y((yaw - 180.0).to_radians());
+            transform = turn.mul(&Mat34::rotation_zyx(dying * std::f32::consts::FRAC_PI_2, 0.0, 0.0)).mul(&back).mul(&transform);
+        }
+        let probe = (feet[0].floor() as i32, (feet[1] + 30.0).floor() as i32, feet[2].floor() as i32);
+        let (sky, block) = (f32::from(light.get(probe)), f32::from(light.get_block(probe)));
+        let tint = if v.hurt_ticks > 0 || v.death_ticks > 0 { [1.0, 0.55, 0.55] } else { [1.0, 1.0, 1.0] };
+
+        let mut quads: Vec<Quad> = Vec::new();
+        let pose = l.rig.pose(&l.model, &state, false);
+        l.model.mesh(&pose, &transform, &mut quads);
+        push_quads(models, &quads, feet, skin, tint, 1.0, sky, block, true);
+
+        if breathing && v.death_ticks == 0 {
+            if let Some(glow) = glow {
+                let intensity = (state.breath_amount * 1.4).min(1.0);
+                let mut lit: Vec<Quad> = Vec::new();
+                let pose = l.rig.pose(&l.model, &state, true);
+                // A hair larger, so the glow sits on the plates rather than fighting them.
+                l.model.mesh(&pose, &entity_transform(l.scale * 1.004, yaw), &mut lit);
+                push_quads(translucent, &lit, feet, glow, [intensity; 3], 1.0, 15.0, 15.0, false);
+            }
+        }
+        if let Some(beam) = beam {
+            if let Some((from, to)) = v.beam {
+                push_beam(translucent, beam, from, to, 2.6, [0.55, 0.85, 1.0]);
+                push_beam(translucent, beam, from, to, 1.0, [1.0, 1.0, 1.0]);
+            }
+            if let Some((at, strength)) = v.charge {
+                let size = 1.0 + strength as f64 * 3.0;
+                push_beam(translucent, beam, [at[0], at[1] - size / 2.0, at[2]], [at[0], at[1] + size / 2.0, at[2]], size as f32, [0.45, 0.75, 1.0]);
+            }
+            for at in &v.warnings {
+                push_ground_mark(translucent, beam, *at, 1.2, [1.0, 0.25, 0.1]);
+            }
+            if let Some((at, radius)) = v.shockwave {
+                let n = 48;
+                for i in 0..n {
+                    let a = std::f64::consts::TAU * i as f64 / n as f64;
+                    let p = [at[0] + a.cos() * radius, at[1] + 0.2, at[2] + a.sin() * radius];
+                    push_ground_mark(translucent, beam, p, 2.0, [0.85, 0.75, 0.55]);
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_quads(mesh: &mut ChunkMesh, quads: &[Quad], feet: [f64; 3], region: [f32; 4], tint: [f32; 3], alpha: f32, sky: f32, block: f32, shaded: bool) {
+    let origin = Vec3::new(feet[0] as f32, feet[1] as f32, feet[2] as f32);
+    for q in quads {
+        let p: [Vec3; 4] = q.positions.map(Vec3::from_array);
+        let normal = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+        let shade = if shaded { entity_shade(normal) } else { 1.0 };
+        let start = mesh.vertices.len() as u32;
+        for (corner, uv) in p.iter().zip(q.uvs) {
+            mesh.vertices.push(Vertex {
+                position: (origin + *corner).to_array(),
+                uv: [region[0] + (region[2] - region[0]) * uv[0], region[1] + (region[3] - region[1]) * uv[1]],
+                color: [shade * tint[0], shade * tint[1], shade * tint[2], alpha],
+                sky_light: sky,
+                block_light: block,
+            });
+        }
+        mesh.indices.extend_from_slice(&[start, start + 1, start + 2, start, start + 2, start + 3]);
+        mesh.faces += 1;
+    }
+}
+
+/// A glowing square-section bar from `from` to `to`, `width` blocks across, full bright.
+fn push_beam(mesh: &mut ChunkMesh, region: [f32; 4], from: [f64; 3], to: [f64; 3], width: f32, color: [f32; 3]) {
+    let a = Vec3::new(from[0] as f32, from[1] as f32, from[2] as f32);
+    let b = Vec3::new(to[0] as f32, to[1] as f32, to[2] as f32);
+    let axis = (b - a).normalize_or_zero();
+    if axis == Vec3::ZERO {
+        return;
+    }
+    let up = if axis.y.abs() > 0.9 { Vec3::X } else { Vec3::Y };
+    let side = axis.cross(up).normalize() * (width / 2.0);
+    let lift = side.cross(axis).normalize() * (width / 2.0);
+    let length = (b - a).length();
+    for (u, v) in [(side, lift), (lift, -side), (-side, -lift), (-lift, side)] {
+        let corners = [a + u + v, a - u + v, b - u + v, b + u + v];
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, length], [0.0, length]];
+        push_flat(mesh, region, corners, uvs, color);
+    }
+}
+
+/// A flat mark lying on the ground at `at`.
+fn push_ground_mark(mesh: &mut ChunkMesh, region: [f32; 4], at: [f64; 3], size: f32, color: [f32; 3]) {
+    let c = Vec3::new(at[0] as f32, at[1] as f32 + 0.05, at[2] as f32);
+    let h = size / 2.0;
+    let corners = [c + Vec3::new(-h, 0.0, -h), c + Vec3::new(-h, 0.0, h), c + Vec3::new(h, 0.0, h), c + Vec3::new(h, 0.0, -h)];
+    push_flat(mesh, region, corners, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], color);
+}
+
+fn push_flat(mesh: &mut ChunkMesh, region: [f32; 4], corners: [Vec3; 4], uvs: [[f32; 2]; 4], color: [f32; 3]) {
+    let start = mesh.vertices.len() as u32;
+    for (corner, uv) in corners.iter().zip(uvs) {
+        mesh.vertices.push(Vertex {
+            position: corner.to_array(),
+            // The beam texture only varies across the beam: its middle row is used all along it.
+            uv: [region[0] + (region[2] - region[0]) * uv[0], region[1] + (region[3] - region[1]) * 0.5],
+            color: [color[0], color[1], color[2], 1.0],
+            sky_light: 15.0,
+            block_light: 15.0,
+        });
+    }
+    // Both sides: a beam is seen from anywhere.
+    mesh.indices.extend_from_slice(&[start, start + 1, start + 2, start, start + 2, start + 3]);
+    mesh.indices.extend_from_slice(&[start, start + 2, start + 1, start, start + 3, start + 2]);
+    mesh.faces += 2;
+}

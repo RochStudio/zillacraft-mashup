@@ -11,6 +11,14 @@ use std::collections::HashMap;
 pub fn item_icon(packs: &PackStack, key: &str, icon_size: usize) -> Result<Option<RgbaImage>> {
     let id = ResourceId::parse(key)?;
     let definition = packs.item_definition(&id)?;
+    if let Some(icon) = definition
+        .as_ref()
+        .map(|value| special_icon(packs, &value["model"], icon_size))
+        .transpose()?
+        .flatten()
+    {
+        return Ok(Some(icon));
+    }
     let model = definition.as_ref().and_then(|value| item_model_reference(&value["model"]));
     let tints = definition
         .as_ref()
@@ -39,6 +47,108 @@ pub fn item_icon(packs: &PackStack, key: &str, icon_size: usize) -> Result<Optio
     let side = decoded.width().min(decoded.height());
     let first = image::imageops::crop_imm(&decoded, 0, 0, side, side).to_image();
     Ok(Some(image::imageops::resize(&first, icon_size as u32, icon_size as u32, FilterType::Nearest)))
+}
+
+/// The icon of an item vanilla draws with a special renderer, for the kinds built here as
+/// the boxes that renderer draws: chests (on each kind's sheet) and banners (in each color).
+/// The model is the one shown outside any season or condition (a `select`'s fallback).
+fn special_icon(packs: &PackStack, model: &serde_json::Value, icon_size: usize) -> Result<Option<RgbaImage>> {
+    let mut node = model;
+    for _ in 0..8 {
+        node = match node["type"].as_str() {
+            Some("minecraft:special") => break,
+            Some("minecraft:select" | "minecraft:range_dispatch") => &node["fallback"],
+            Some("minecraft:condition") => &node["on_false"],
+            _ => return Ok(None),
+        };
+    }
+    let (Some("minecraft:special"), Some(base)) = (node["type"].as_str(), node["base"].as_str()) else {
+        return Ok(None);
+    };
+    let special = &node["model"];
+    let (model, tints) = match special["type"].as_str() {
+        Some("minecraft:chest") => {
+            let sheet = ResourceId::parse(special["texture"].as_str().unwrap_or("minecraft:normal"))?;
+            let texture = ResourceId::parse(&format!("{}:entity/chest/{}", sheet.namespace, sheet.path))?;
+            (crate::model::chest_model(&texture, "single", "south"), Vec::new())
+        }
+        Some("minecraft:banner") => (banner_model()?, vec![dye_color(special["color"].as_str().unwrap_or("white"))]),
+        _ => return Ok(None),
+    };
+    let pose = crate::item_icon::GuiPose::of(packs, base)?;
+    crate::item_icon::elements_icon(packs, &model.elements, &tints, &pose, icon_size)
+}
+
+/// The standing banner's boxes (`BannerModel`'s pole and bar, `BannerFlagModel`'s flag) as
+/// its item transformation places them: two thirds size about the block's middle, Y and Z
+/// turned over. The flag takes tint 0, the banner's color.
+fn banner_model() -> Result<crate::model::ResolvedModel> {
+    let sheet = ResourceId::parse("minecraft:entity/banner/banner_base")?;
+    let third = |n: f32| n / 3.0;
+    // From and to in block pixels; the part's texture offset; its model width, height, depth.
+    let parts = [
+        ([third(22.0), 0.0, third(22.0)], [third(26.0), 28.0, third(26.0)], [44.0, 0.0], [2.0, 42.0, 2.0], false),
+        ([third(4.0), 28.0, third(22.0)], [third(44.0), third(88.0), third(26.0)], [0.0, 42.0], [20.0, 2.0, 2.0], false),
+        ([third(4.0), third(8.0), third(26.0)], [third(44.0), third(88.0), third(28.0)], [0.0, 0.0], [20.0, 40.0, 1.0], true),
+    ];
+    let elements = parts
+        .into_iter()
+        .map(|(from, to, [u, v], [w, h, d], flag): ([f32; 3], [f32; 3], [f32; 2], [f32; 3], bool)| {
+            // `ModelPart.Cube`'s sheet layout, with Y and Z turned over as the banner is.
+            let faces = [
+                ("up", [u + d, v + d, u + d + w, v]),
+                ("down", [u + d + w, v + d, u + d + 2.0 * w, v]),
+                ("south", [u + d, v + d, u + d + w, v + d + h]),
+                ("north", [u + 2.0 * d + w, v + d, u + 2.0 * d + 2.0 * w, v + d + h]),
+                ("west", [u, v + d, u + d, v + d + h]),
+                ("east", [u + d + w, v + d, u + 2.0 * d + w, v + d + h]),
+            ];
+            crate::model::Element {
+                from: from.map(|c| c / 16.0),
+                to: to.map(|c| c / 16.0),
+                faces: faces
+                    .into_iter()
+                    .map(|(direction, uv)| crate::model::Face {
+                        direction: direction.into(),
+                        texture: sheet.clone(),
+                        uv: uv.map(|c| c / 64.0),
+                        cull: false,
+                        cullface: None,
+                        tint: flag,
+                        tint_index: flag.then_some(0),
+                        force_translucent: false,
+                    })
+                    .collect(),
+                rotation_y: 0,
+                rotation: None,
+                shade_direction_override: None,
+            }
+        })
+        .collect();
+    Ok(crate::model::ResolvedModel { elements })
+}
+
+/// `DyeColor`'s texture colors.
+fn dye_color(name: &str) -> [u8; 3] {
+    let rgb: u32 = match name.trim_start_matches("minecraft:") {
+        "orange" => 0xF9801D,
+        "magenta" => 0xC74EBD,
+        "light_blue" => 0x3AB3DA,
+        "yellow" => 0xFED83D,
+        "lime" => 0x80C71F,
+        "pink" => 0xF38BAA,
+        "gray" => 0x474F52,
+        "light_gray" => 0x9D9D97,
+        "cyan" => 0x169C9C,
+        "purple" => 0x8932B8,
+        "blue" => 0x3C44AA,
+        "brown" => 0x835432,
+        "green" => 0x5E7C16,
+        "red" => 0xB02E26,
+        "black" => 0x1D1D21,
+        _ => 0xF9FFFE,
+    };
+    [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8]
 }
 
 /// The pack's English names (`lang/en_us.json`).

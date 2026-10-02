@@ -152,6 +152,7 @@ pub(crate) fn route_weapon_commands(
     mut inbox: ResMut<ClientActionInbox>,
     mut seq: ResMut<net::ActionRequestIds>,
     completions: Res<WeaponArgCompletions>,
+    mut creative: Option<ResMut<frame::Creative>>,
 ) {
     let capacity = settings.log_capacity;
     let echo = |msg: String, console: &mut ConsoleState, line: &mut ConsoleLine| {
@@ -190,6 +191,13 @@ pub(crate) fn route_weapon_commands(
                         continue;
                     }
                     GiveTarget::Weapon(name) => name,
+                    GiveTarget::Minecraft(item, count) => {
+                        match creative.as_deref_mut() {
+                            Some(creative) => creative.gives.push((item.to_owned(), count)),
+                            None => echo("give: no Minecraft inventory here".into(), &mut console, &mut line),
+                        }
+                        continue;
+                    }
                 };
                 let Some(weapons) = weapons.as_ref() else {
                     echo(
@@ -304,13 +312,15 @@ pub(crate) fn route_weapon_commands(
     }
 }
 
-const GIVE_USAGE: &str = "give ammo | give killstreak/<name> | give weapon/<game:weapon> [attachment...] — resupply ammo, acquire a reward, or equip a weapon";
+const GIVE_USAGE: &str = "give ammo | give killstreak/<name> | give weapon/<game:weapon> [attachment...] | give <minecraft item> [count] — resupply ammo, acquire a reward, equip a weapon, or take Minecraft items (a stack unless counted)";
 
 #[derive(Debug, PartialEq)]
 enum GiveTarget<'a> {
     Ammo,
     Killstreak(&'a str),
     Weapon(&'a str),
+    /// A Minecraft item, as `stone` or `minecraft:stone`, and how many.
+    Minecraft(&'a str, Option<u32>),
 }
 
 fn parse_give_target(args: &[String]) -> Result<GiveTarget<'_>, &'static str> {
@@ -329,6 +339,13 @@ fn parse_give_target(args: &[String]) -> Result<GiveTarget<'_>, &'static str> {
     }
     if let Some(name) = item.strip_prefix("weapon/").filter(|name| !name.is_empty()) {
         return Ok(GiveTarget::Weapon(name));
+    }
+    if !item.contains('/') && args.len() <= 2 {
+        let count = match args.get(1) {
+            None => None,
+            Some(count) => Some(count.parse::<u32>().ok().filter(|n| (1..=2304).contains(n)).ok_or(GIVE_USAGE)?),
+        };
+        return Ok(GiveTarget::Minecraft(item, count));
     }
     Err(GIVE_USAGE)
 }

@@ -46,6 +46,8 @@ pub struct ServerSim {
     take_xp_delay: i32,
     /// The client was asked to close its trading screen.
     merchant_closing: bool,
+    /// ZillaCraft's kaiju, which the entity world doesn't simulate.
+    kaiju: crate::kaiju_server::KaijuWorld,
 }
 
 /// What a player's hit or use on a mob did, for the client to present.
@@ -209,6 +211,7 @@ impl ServerSim {
             explosions: Vec::new(),
             take_xp_delay: 0,
             merchant_closing: false,
+            kaiju: crate::kaiju_server::KaijuWorld::default(),
         }
     }
 
@@ -614,6 +617,11 @@ impl ServerSim {
     /// `/summon` for a mob: the level makes its tag (`SummonCommand`), and
     /// it joins the entity world as a loaded mob would.
     pub fn summon(&mut self, kind: &str, position: [f64; 3], nbt: Option<&minecraftoss_core::nbt::Tag>, y_rot: f32) -> Result<(), String> {
+        if kind == crate::kaiju_server::GODZILLA {
+            // Summoned by the local player, it comes for it.
+            self.kaiju.spawn(position, y_rot, Some(0));
+            return Ok(());
+        }
         let tag = self.level.summon_mob(kind, position, nbt, y_rot)?;
         // A new brain reads the schedule for the time it is.
         self.mobs.set_day_time(self.level.overworld_clock());
@@ -633,6 +641,17 @@ impl ServerSim {
             self.level.explode(Explosion { center: blast.position.to_array(), radius: blast.radius, fire: false, interaction, source: None });
             self.explosions.push(blast);
         }
+    }
+
+    /// What a fallen Godzilla leaves: 16-32 diamonds and emeralds, and 1000 experience.
+    fn drop_kaiju_loot(&mut self, at: [f64; 3]) {
+        let roll = (at[0].to_bits() ^ at[2].to_bits()) as usize;
+        for (i, item) in ["minecraft:diamond", "minecraft:emerald"].into_iter().enumerate() {
+            let count = 16 + ((roll >> (i * 5)) % 17) as i32;
+            let spread = [((roll >> 3) % 7) as f64 * 0.05 - 0.15, 0.3, ((roll >> 7) % 7) as f64 * 0.05 - 0.15];
+            self.spawn_item(item, count, None, [at[0], at[1] + 2.0, at[2]], spread, 10, 0);
+        }
+        self.award_experience(at, 1000);
     }
 
     /// The blasts since the last call, for the client's sound and particles.
@@ -845,6 +864,10 @@ pub enum Command {
     MobAction { hit: minecraftoss_entities::world::MobHit, attack: Option<minecraftoss_entities::world::PlayerAttack>, inventory: Box<minecraftoss_player::inventory::Inventory>, selected: usize, infinite: bool },
     /// An operation on the player's trading screen.
     Merchant { op: MerchantOp, inventory: Box<minecraftoss_player::inventory::Inventory>, selected: usize, feet: [f64; 3] },
+    /// A player's hit on a kaiju, in Minecraft health before its armor.
+    KaijuHurt { id: u64, damage: f32, attacker: u64 },
+    /// `kaiju clear`.
+    KaijuClear,
     /// One server tick, with the player's state for it.
     Tick(Box<TickInput>),
 }
@@ -908,6 +931,8 @@ pub struct Output {
     pub summoned: Vec<Result<String, String>>,
     /// Positions where bone meal was used.
     pub bone_meal_used: Vec<BlockPos>,
+    /// The kaiju the client draws, after a tick.
+    pub kaiju: Option<Vec<crate::kaiju_server::KaijuView>>,
     /// How many commands the server has handled so far.
     pub handled: u64,
     /// The last tick's phases, light solves and total milliseconds.
@@ -1029,6 +1054,11 @@ impl ServerHandle {
     /// mob's yaw comes from its own random (`LivingEntity`'s constructor:
     /// `nextFloat() * (float)(Math.PI * 2)`, in degrees), seeded here from
     /// the clock as a fresh entity's is.
+    /// A summon facing a chosen way (Minecraft yaw, degrees).
+    pub fn summon_facing(&mut self, kind: String, position: [f64; 3], y_rot: f32) {
+        self.send(Command::Summon { kind, position, nbt: None, y_rot });
+    }
+
     pub fn summon(&mut self, kind: String, position: [f64; 3], nbt: Option<minecraftoss_core::nbt::Tag>) {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as i64);
         let y_rot = minecraftoss_core::random::LegacyRandom::new(nanos).next_f32() * (std::f64::consts::PI * 2.0) as f32;
@@ -1037,6 +1067,14 @@ impl ServerHandle {
 
     /// Hands a player's hit or use on a mob to the server; its result
     /// arrives in an output.
+    pub fn kaiju_hurt(&mut self, id: u64, damage: f32, attacker: u64) {
+        self.send(Command::KaijuHurt { id, damage, attacker });
+    }
+
+    pub fn kaiju_clear(&mut self) {
+        self.send(Command::KaijuClear);
+    }
+
     pub fn mob_action(&mut self, hit: minecraftoss_entities::world::MobHit, attack: Option<minecraftoss_entities::world::PlayerAttack>, inventory: &minecraftoss_player::inventory::Inventory, selected: usize, infinite: bool) {
         self.send(Command::MobAction { hit, attack, inventory: Box::new(inventory.clone()), selected, infinite });
     }
@@ -1118,6 +1156,10 @@ fn server_loop(mut sim: ServerSim, commands: std::sync::mpsc::Receiver<Command>,
                 Command::Merchant { op, inventory, selected, feet } => {
                     out.merchant.push(sim.merchant(op, *inventory, selected, feet));
                 }
+                Command::KaijuHurt { id, damage, attacker } => sim.kaiju.hurt(id, damage, attacker),
+                Command::KaijuClear => {
+                    sim.kaiju.clear();
+                }
                 Command::Tick(input) => {
                     let started = std::time::Instant::now();
                     let input = *input;
@@ -1160,6 +1202,26 @@ fn server_loop(mut sim: ServerSim, commands: std::sync::mpsc::Receiver<Command>,
                     out.potion_breaks.extend(sim.mobs.take_potion_breaks());
                     out.explosions.extend(sim.take_explosions());
                     out.mob_sounds.extend(sim.mobs.take_sounds());
+                    if !sim.kaiju.is_empty() {
+                        let players: Vec<crate::kaiju_server::KaijuPlayer> = input
+                            .mob_players
+                            .iter()
+                            .map(|p| crate::kaiju_server::KaijuPlayer {
+                                id: p.id,
+                                feet: p.position.to_array(),
+                                alive: p.alive && !p.spectator,
+                                attackable: p.attackable,
+                            })
+                            .collect();
+                        let griefing = sim.mobs.mob_griefing();
+                        let tick = sim.kaiju.tick(&mut sim.level, &players, griefing);
+                        out.player_hits.extend(tick.player_hits);
+                        out.mob_sounds.extend(tick.sounds);
+                        for at in tick.deaths {
+                            sim.drop_kaiju_loot(at);
+                        }
+                    }
+                    out.kaiju = Some(sim.kaiju.views());
                     sim.level.last_tick_phases[5] += mobs_started.elapsed().as_secs_f64() * 1000.0;
                     out.mobs = Some(Box::new(sim.tracked_mobs(input.tracking.0, input.tracking.1)));
                     let pickup_feet = input.pickup.as_ref().map(|(feet, _, _)| *feet);

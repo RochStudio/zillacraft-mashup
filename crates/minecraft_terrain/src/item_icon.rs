@@ -142,6 +142,125 @@ pub fn block_icon(
     Ok((output.pixels().any(|pixel| pixel[3] > 0)).then_some(output))
 }
 
+/// An item model's `display.gui` pose, and whether it is lit from the front (`gui_light:
+/// front`: flat, unshaded).
+pub(crate) struct GuiPose {
+    x_angle: f32,
+    y_angle: f32,
+    scale: f32,
+    /// In GUI pixels, x right and y up.
+    translation: [f32; 2],
+    flat: bool,
+}
+
+impl GuiPose {
+    /// The pose `model` (or the nearest model it inherits from) gives the GUI.
+    pub(crate) fn of(packs: &PackStack, model: &str) -> Result<Self> {
+        let mut gui = None;
+        let mut light = None;
+        let mut current = Some(ResourceId::parse(model)?);
+        for _ in 0..12 {
+            let Some(id) = current.take() else { break };
+            let Some(value) = packs.model(&id)? else { break };
+            if gui.is_none() {
+                gui = value.get("display").and_then(|display| display.get("gui")).cloned();
+            }
+            if light.is_none() {
+                light = value.get("gui_light").and_then(Value::as_str).map(str::to_owned);
+            }
+            current = value.get("parent").and_then(Value::as_str).map(ResourceId::parse).transpose()?;
+        }
+        let rotation = gui.as_ref().and_then(|value| value.get("rotation"));
+        let number = |key: &str, axis: usize| {
+            gui.as_ref()
+                .and_then(|value| value.get(key))
+                .and_then(Value::as_array)
+                .and_then(|values| values.get(axis))
+                .and_then(Value::as_f64)
+                .map(|v| v as f32)
+        };
+        Ok(Self {
+            x_angle: angle(rotation, 0).unwrap_or(30.0).to_radians(),
+            y_angle: angle(rotation, 1).unwrap_or(225.0).to_radians(),
+            scale: number("scale", 0).unwrap_or(0.625),
+            translation: [number("translation", 0).unwrap_or(0.0), number("translation", 1).unwrap_or(0.0)],
+            flat: light.as_deref() == Some("front"),
+        })
+    }
+
+    fn place(&self, [x, y, z]: Point3, icon_size: usize) -> Point3 {
+        let (sy, cy) = self.y_angle.sin_cos();
+        let (sx, cx) = self.x_angle.sin_cos();
+        let rotated_x = x * cy + z * sy;
+        let rotated_z = -x * sy + z * cy;
+        let rotated_y = y * cx - rotated_z * sx;
+        let depth = y * sx + rotated_z * cx;
+        let pixels_per_gui_unit = icon_size as f32 / 16.0;
+        [
+            (8.0 + self.translation[0] + rotated_x * self.scale) * pixels_per_gui_unit,
+            (8.0 - (self.translation[1] + rotated_y * self.scale)) * pixels_per_gui_unit,
+            depth,
+        ]
+    }
+}
+
+/// An icon from resolved model boxes (block units, each face's texture and UVs as the
+/// world's meshes take them, unturned), posed for the GUI: the item models a special
+/// renderer draws in vanilla (chests, banners), built as the boxes those renderers draw.
+pub(crate) fn elements_icon(
+    packs: &PackStack,
+    elements: &[crate::model::Element],
+    tints: &[[u8; 3]],
+    pose: &GuiPose,
+    icon_size: usize,
+) -> Result<Option<RgbaImage>> {
+    let mut output = RgbaImage::new(icon_size as u32, icon_size as u32);
+    let mut depth = vec![vec![f32::NEG_INFINITY; icon_size]; icon_size];
+    let mut sheets = HashMap::<ResourceId, Option<RgbaImage>>::new();
+    for element in elements {
+        let (from, to) = (element.from.map(|v| v * 16.0), element.to.map(|v| v * 16.0));
+        for (name, corners) in cuboid_faces(from, to) {
+            if !face_faces_camera(name, pose.x_angle, pose.y_angle) {
+                continue;
+            }
+            let Some(face) = element.faces.iter().find(|face| face.direction == name) else {
+                continue;
+            };
+            if !sheets.contains_key(&face.texture) {
+                let sheet = match packs.texture(&face.texture)? {
+                    Some(bytes) => Some(image::load_from_memory(&bytes)?.to_rgba8()),
+                    None => None,
+                };
+                sheets.insert(face.texture.clone(), sheet);
+            }
+            let Some(source) = sheets.get(&face.texture).and_then(Option::as_ref) else {
+                continue;
+            };
+            let side = source.width().min(source.height());
+            if side == 0 {
+                continue;
+            }
+            let tint = face.tint_index.and_then(|index| tints.get(index)).copied().unwrap_or([255; 3]);
+            let vertices = corners.map(|point| pose.place(point, icon_size));
+            let shade = if pose.flat { 1.0 } else { item_diffuse_light(name, pose.x_angle, pose.y_angle) };
+            for triangle in [[0, 1, 2], [0, 2, 3]] {
+                raster_triangle(
+                    &mut output,
+                    &mut depth,
+                    source,
+                    side,
+                    icon_size,
+                    shade,
+                    tint,
+                    triangle.map(|corner| vertices[corner]),
+                    triangle.map(|corner| uv(corner, face.uv)),
+                );
+            }
+        }
+    }
+    Ok(output.pixels().any(|pixel| pixel[3] > 0).then_some(output))
+}
+
 fn item_diffuse_light(face: &str, x_angle: f32, y_angle: f32) -> f32 {
     // Lighting.Entry.ITEMS_3D and minecraft_mix_light in the pinned 26.3
     // Lighting.java / assets/minecraft/shaders/include/light.glsl.

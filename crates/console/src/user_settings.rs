@@ -351,6 +351,7 @@ fn serialize_settings(settings: &frame::GameSettings, binds: &KeyBinds) -> Strin
         format!("fullscreen={}", settings.fullscreen),
         format!("vsync={}", settings.vsync),
         format!("master_volume={:.3}", settings.master_volume),
+        format!("audio_device={}", settings.audio_device.replace(['\n', '\r'], " ")),
         format!("brightness={:.3}", settings.brightness),
         format!("fov={:.0}", settings.fov),
         format!("shadows={}", settings.shadows),
@@ -457,6 +458,7 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
                 }
             }
             "player_name" => settings.player_name = value.to_owned(),
+            "audio_device" => settings.audio_device = value.trim().to_owned(),
             "pad_layout" => parse_into(value, &mut settings.pad_layout),
             "pad_stick_layout" => parse_into(value, &mut settings.pad_stick_layout),
             "pad_sensitivity" => {
@@ -499,6 +501,42 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
     }
 }
 
+/// The Audio page's output device rows: the one in use, and the device list's slots and
+/// which of them is in use.
+const AUDIO_DEVICE_ROWS: usize = 8;
+
+fn publish_audio_devices(dvars: &mut frame::UiMenuDvars, current: &str, devices: &[String]) {
+    // Device names run long ("Headphones (2- Wireless Headset Hands-Free)"); the rows fit
+    // about this many characters.
+    let fit = |name: &str| {
+        if name.chars().count() > 44 {
+            format!("{}...", name.chars().take(41).collect::<String>())
+        } else {
+            name.to_owned()
+        }
+    };
+    dvars.set("ui_snd_device", if current.is_empty() { "System default".to_owned() } else { fit(current) });
+    dvars.set("ui_snd_device_sel_default", if current.is_empty() { "1" } else { "0" });
+    for row in 0..AUDIO_DEVICE_ROWS {
+        let name = devices.get(row);
+        dvars.set(&format!("ui_snd_device_{row}"), name.map_or_else(String::new, |name| fit(name)));
+        dvars.set(&format!("ui_snd_device_sel_{row}"), if name.is_some_and(|name| name == current) { "1" } else { "0" });
+    }
+}
+
+/// The output device the settings name, for the audio output (which falls back to the
+/// system's default when that device isn't there).
+pub(crate) fn apply_audio_device(
+    settings: Res<frame::GameSettings>,
+    device: Option<ResMut<bevy::audio::AudioOutputDevice>>,
+) {
+    let Some(mut device) = device else { return };
+    let want = (!settings.audio_device.is_empty()).then(|| settings.audio_device.clone());
+    if device.0 != want {
+        device.0 = want;
+    }
+}
+
 pub(crate) fn native_menu_settings(
     mut events: MessageReader<crate::ConsoleCommand>,
     mut settings: ResMut<frame::GameSettings>,
@@ -507,6 +545,7 @@ pub(crate) fn native_menu_settings(
     mut dof: ResMut<render_frontend::assemble::drawsurf::dof::DofDvars>,
     mut glow: ResMut<render_frontend::assemble::drawsurf::dof::GlowDvars>,
     mut test_rumble: MessageWriter<frame::TestControllerRumble>,
+    mut audio_devices: Local<Vec<String>>,
 ) {
     for command in events.read() {
         if !matches!(command.name.as_str(), "set" | "seta") {
@@ -532,10 +571,32 @@ pub(crate) fn native_menu_settings(
                     settings.master_volume = v;
                 }
             }
+            // The Audio page's device list: read as it opens, picked by its row (-1 is the
+            // system's default).
+            "ui_snd_device_refresh" => {
+                *audio_devices = bevy::audio::audio_output_device_names();
+                continue;
+            }
+            "ui_snd_device_pick" => {
+                let Ok(row) = value.parse::<i32>() else { continue };
+                settings.audio_device = usize::try_from(row)
+                    .ok()
+                    .and_then(|row| audio_devices.get(row))
+                    .cloned()
+                    .unwrap_or_else(String::new);
+            }
             "ui_player_name" => settings.player_name = value.clone(),
             "ui_fov" => {
                 if let Ok(v) = value.parse::<f32>() {
                     settings.fov = v;
+                }
+            }
+            // The Video page's slider, and MW2's own `sensitivity` from its Controls pages.
+            "ui_sensitivity" | "sensitivity" => {
+                if let Ok(v) = value.parse::<f32>()
+                    && v.is_finite()
+                {
+                    settings.sensitivity = v;
                 }
             }
             "ui_brightness" => {
@@ -580,8 +641,11 @@ pub(crate) fn native_menu_settings(
         glow.enable = settings.bloom;
     }
     dvars.set("ui_volume", settings.master_volume.to_string());
+    publish_audio_devices(&mut dvars, &settings.audio_device, &audio_devices);
     dvars.set("ui_brightness", settings.brightness.to_string());
     dvars.set("ui_fov", settings.fov.to_string());
+    dvars.set("ui_sensitivity", format!("{:.1}", settings.sensitivity));
+    dvars.set("sensitivity", format!("{:.1}", settings.sensitivity));
     dvars.set("ui_player_name", settings.player_name.clone());
     dvars.set("ui_shadows", if settings.shadows { "1" } else { "0" });
     dvars.set("ui_dof", if settings.depth_of_field { "1" } else { "0" });

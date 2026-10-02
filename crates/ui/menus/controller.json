@@ -73,6 +73,18 @@
     }
    },
    {
+    "name": "video_sensitivity",
+    "fields": {
+     "vis_exp": "0"
+    }
+   },
+   {
+    "name": "video_sensitivity_label",
+    "fields": {
+     "vis_exp": "0"
+    }
+   },
+   {
     "name": "video_title",
     "fields": {
      "text_key": "Controller"

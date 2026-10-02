@@ -737,8 +737,6 @@ dependencies = [
 [[package]]
 name = "bevy_audio"
 version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06af3bd91de885f2a5c024569779a7fb43349df611d92f7b795c66c8797378db"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -3648,6 +3646,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kaiju"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "killcam_iw4"
 version = "0.1.0"
 
@@ -3910,6 +3916,7 @@ dependencies = [
  "bytemuck",
  "glam 0.29.3",
  "image",
+ "kaiju",
  "minecraftoss-core",
  "minecraftoss-entities",
  "minecraftoss-generator",
@@ -5215,6 +5222,7 @@ dependencies = [
  "glam 0.29.3",
  "hud_iw4",
  "image",
+ "kaiju",
  "lighting_iw4",
  "math_iw4",
  "minecraft_terrain",

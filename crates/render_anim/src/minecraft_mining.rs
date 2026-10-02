@@ -84,8 +84,11 @@ impl Mining {
                     if gone.contains(&pos) {
                         continue;
                     }
-                    let Some(hardness) = hardness(world, pos) else {
-                        continue;
+                    // A creative hand (infinite damage) breaks even bedrock, though not fluids.
+                    let hardness = match hardness(world, pos) {
+                        Some(hardness) => hardness,
+                        None if damage.is_infinite() && breakable(world, pos) => 0.0,
+                        None => continue,
                     };
                     let entry = self.progress.entry(pos).or_insert((0.0, now));
                     entry.0 += if hardness <= 0.0 { 1.0 } else { damage / DAMAGE_PER_HARDNESS / hardness };
@@ -308,11 +311,17 @@ fn blocks_on_segment(from: [f64; 3], to: [f64; 3]) -> Vec<BlockPos> {
     out
 }
 
+/// A block, not air or a fluid.
+fn breakable(world: &WorldRefs<'_>, pos: BlockPos) -> bool {
+    Scene::block(&*world.scene, pos)
+        .is_some_and(|block| !matches!(block.id.path.as_str(), "water" | "lava" | "air" | "cave_air" | "void_air"))
+}
+
 fn hardness(world: &WorldRefs<'_>, pos: BlockPos) -> Option<f32> {
-    let block = Scene::block(&*world.scene, pos)?;
-    if matches!(block.id.path.as_str(), "water" | "lava" | "air" | "cave_air" | "void_air") {
+    if !breakable(world, pos) {
         return None;
     }
+    let block = Scene::block(&*world.scene, pos)?;
     let state = world.stream.states.state_of(block)?;
     let speed = world.registries.blocks.state(state).destroy_speed;
     (speed >= 0.0).then_some(speed)

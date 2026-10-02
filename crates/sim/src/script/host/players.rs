@@ -24,6 +24,10 @@ pub(crate) fn player_object(world: &World, client: u32) -> Value {
 }
 
 pub(crate) fn player_damage(world: &mut World, tick: crate::Tick, hit: &crate::script_player::Hit) {
+    // Nothing hurts a player in creative mode.
+    if FrameWorld::from_world(world).client_meta(hit.victim).is_some_and(|m| m.creative) {
+        return;
+    }
     let victim = player_object(world, hit.victim.0);
     let Value::Object(object) = victim else {
         return;

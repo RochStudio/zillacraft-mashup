@@ -11,6 +11,7 @@ minecraftoss-world = { path = "../../third_party/minecraftoss/world" }
 minecraftoss-generator = { path = "../../third_party/minecraftoss/generator" }
 minecraftoss-player = { path = "../../third_party/minecraftoss/player" }
 minecraftoss-entities = { path = "../../third_party/minecraftoss/entities" }
+kaiju = { path = "../kaiju" }
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.29"

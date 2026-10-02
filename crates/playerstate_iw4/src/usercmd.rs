@@ -54,5 +54,9 @@ pub mod buttons {
 
     pub const OFFHAND_HOLD_CANCEL: u32 = 0x200000;
 
+    /// Not IW4's: the player is in creative mode (flies, can't be hurt). It rides in every
+    /// command so prediction moves as the authority does.
+    pub const CREATIVE: u32 = 0x0100_0000;
+
     pub const SPRINT_INTERFERING: u32 = 0xcc35;
 }

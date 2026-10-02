@@ -387,6 +387,13 @@ fn closed_chest_model(block: &Block) -> Result<ResolvedModel> {
         "right" => "minecraft:entity/chest/normal_right",
         _ => "minecraft:entity/chest/normal",
     })?;
+    let facing = block.properties.get("facing").map_or("north", String::as_str);
+    Ok(chest_model(&texture, chest_type, facing))
+}
+
+/// The closed chest's boxes (single, `left` or `right` half) on an entity chest sheet, turned
+/// to `facing`: the world's chests, and the inventory icons of every kind of chest.
+pub(crate) fn chest_model(texture: &ResourceId, chest_type: &str, facing: &str) -> ResolvedModel {
     let omitted_side = match chest_type {
         "left" => Some("west"),
         "right" => Some("east"),
@@ -397,12 +404,7 @@ fn closed_chest_model(block: &Block) -> Result<ResolvedModel> {
         "right" => (1.0, 16.0, 15.0, 16.0),
         _ => (1.0, 15.0, 7.0, 9.0),
     };
-    let rotation_y = match block
-        .properties
-        .get("facing")
-        .map(String::as_str)
-        .unwrap_or("north")
-    {
+    let rotation_y = match facing {
         "north" => 180,
         "east" => 270,
         "south" => 0,
@@ -487,7 +489,7 @@ fn closed_chest_model(block: &Block) -> Result<ResolvedModel> {
             .collect(),
         }
     };
-    Ok(ResolvedModel {
+    ResolvedModel {
         elements: vec![
             make_box(
                 [body_x0 / 16.0, 0.0, 1.0 / 16.0],
@@ -508,7 +510,7 @@ fn closed_chest_model(block: &Block) -> Result<ResolvedModel> {
                 0.0,
             ),
         ],
-    })
+    }
 }
 
 fn resolve_choices(pack: &PackStack, block: &Block, choices: &[&Value]) -> Result<ResolvedModel> {

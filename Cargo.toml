@@ -3,10 +3,13 @@
 # Remove when a crates.io release includes quinn-rs/quinn#2806.
 [patch.crates-io]
 quinn-proto = { git = "https://github.com/quinn-rs/quinn", rev = "f650e0f213b01ea7bebd60023e5df7df65e5c2bd" }
+# bevy_audio 0.19.0 plays only on the system's default output device. The copy here adds
+# `AudioOutputDevice` (see its `audio_output.rs`) so the options can pick one.
+bevy_audio = { path = "third_party/bevy_audio" }
 
 [workspace]
 resolver = "3"
-exclude = ["skate", "third_party/minecraftoss"]
+exclude = ["skate", "third_party/minecraftoss", "third_party/bevy_audio"]
 members = [
     "crates/anim_iw4",
     "crates/approved_tests",
@@ -42,6 +45,7 @@ members = [
     "crates/hud_iw4",
     "crates/killcam_iw4",
     "crates/input_iw4",
+    "crates/kaiju",
     "crates/launcher",
     "crates/minecraft_terrain",
     "crates/lighting_iw4",
@@ -113,6 +117,7 @@ sha2 = "0.10"
 png = "0.18"
 anim_iw4 = { path = "crates/anim_iw4" }
 asset_iw4 = { path = "crates/asset_iw4" }
+kaiju = { path = "crates/kaiju" }
 asset_core = { path = "crates/asset_core" }
 asset_anim = { path = "crates/asset_anim" }
 asset_audio = { path = "crates/asset_audio" }

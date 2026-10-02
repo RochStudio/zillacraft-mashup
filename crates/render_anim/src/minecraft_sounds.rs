@@ -28,11 +28,14 @@ pub(crate) struct Sounds {
 impl Sounds {
     pub(crate) fn load(packs: &PackStack) -> Self {
         let mut events = HashMap::new();
-        let json = ResourceId::parse("minecraft:sounds")
+        // Minecraft's events by their bare names; another namespace's (ZillaCraft's) keep it.
+        for namespace in ["minecraft", "zillacraft"] {
+        let json = ResourceId::parse(&format!("{namespace}:sounds"))
             .ok()
             .and_then(|id| packs.json(&id, "sounds.json").ok().flatten());
         if let Some(entries) = json.as_ref().and_then(serde_json::Value::as_object) {
             for (event, value) in entries {
+                let event = if namespace == "minecraft" { event.clone() } else { format!("{namespace}:{event}") };
                 let list = value["sounds"]
                     .as_array()
                     .map(|sounds| {
@@ -58,8 +61,9 @@ impl Sounds {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                events.insert(event.clone(), list);
+                events.insert(event, list);
             }
+        }
         }
         diag::info!(World, "Minecraft sounds: {} events", events.len());
         Self {

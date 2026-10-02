@@ -10,6 +10,28 @@ use bevy::prelude::*;
 pub const MC_INVENTORY_SLOTS: usize = 41;
 pub const MC_HOTBAR: usize = 9;
 
+/// The creative screen's tabs, as vanilla's: each name, and the item its icon shows. The
+/// last two are the search and the player's own inventory.
+pub const CREATIVE_TABS: [(&str, &str); 12] = [
+    ("BUILDING BLOCKS", "minecraft:bricks"),
+    ("COLORED BLOCKS", "minecraft:cyan_wool"),
+    ("NATURAL BLOCKS", "minecraft:grass_block"),
+    ("FUNCTIONAL BLOCKS", "minecraft:crafting_table"),
+    ("REDSTONE", "minecraft:redstone"),
+    ("TOOLS", "minecraft:diamond_pickaxe"),
+    ("COMBAT", "minecraft:netherite_sword"),
+    ("FOOD AND DRINKS", "minecraft:golden_apple"),
+    ("INGREDIENTS", "minecraft:iron_ingot"),
+    ("SPAWN EGGS", "minecraft:pig_spawn_egg"),
+    ("SEARCH", "minecraft:compass"),
+    ("INVENTORY", "minecraft:barrel"),
+];
+pub const CREATIVE_SEARCH: usize = 10;
+pub const CREATIVE_INVENTORY: usize = 11;
+/// The creative screen's item grid.
+pub const CREATIVE_COLUMNS: usize = 9;
+pub const CREATIVE_ROWS: usize = 5;
+
 /// One stack as the HUD shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct McStack {
@@ -46,6 +68,13 @@ pub enum McClick {
     Spread { slots: Vec<usize>, right: bool },
     /// The screen closed: the carried stack and the crafting grid go back.
     Close,
+    /// Creative screen, a click on a listed item: picks one up (a stack with shift), adds to
+    /// or takes from the same item carried, or (left) throws away another.
+    CreativeTake { id: String, right: bool, shift: bool },
+    /// Creative screen, a number key over a listed item: a stack of it in that hotbar slot.
+    CreativeHotbar { id: String, hotbar: usize },
+    /// Creative screen, the carried stack put down on the list: it is gone.
+    CreativeDestroy,
 }
 
 #[derive(Resource, Default)]
@@ -57,6 +86,15 @@ pub struct MinecraftUi {
     pub loading_world: bool,
     /// The inventory screen is open (the HUD's to change).
     pub inventory_open: bool,
+    /// Creative mode is on: the inventory key opens the creative screen.
+    pub creative: bool,
+    /// The creative screen (the HUD's to change): its tab, the first row of items shown, and
+    /// what is typed on the search tab.
+    pub creative_tab: usize,
+    pub creative_row: usize,
+    pub creative_search: String,
+    /// The items on the creative screen's open tab (as searched), from the world.
+    pub creative_items: Vec<String>,
     /// The selected hotbar slot.
     pub selected: usize,
     pub slots: Vec<Option<McStack>>,

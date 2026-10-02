@@ -1033,13 +1033,17 @@ fn preflight_match_install(
             None => script_dvars.push((name.clone(), value.clone())),
         }
     }
-    // A Minecraft world has no time or score limit.
+    // A Minecraft world has no time or score limit, and tougher players.
     if assets::minecraft_map::is_minecraft_load(zone) {
-        for limit in ["timelimit", "scorelimit"] {
-            let name = format!("scr_{gametype}_{limit}");
+        let sets = [
+            (format!("scr_{gametype}_timelimit"), "0".to_owned()),
+            (format!("scr_{gametype}_scorelimit"), "0".to_owned()),
+            ("scr_player_maxhealth".to_owned(), assets::minecraft_map::PLAYER_MAX_HEALTH.to_string()),
+        ];
+        for (name, value) in sets {
             match script_dvars.iter_mut().find(|(set, _)| set.eq_ignore_ascii_case(&name)) {
-                Some((_, set)) => *set = "0".into(),
-                None => script_dvars.push((name, "0".into())),
+                Some((_, set)) => *set = value,
+                None => script_dvars.push((name, value)),
             }
         }
     }

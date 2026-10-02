@@ -14,6 +14,7 @@ mod crash;
 mod dmgtimer;
 mod drop_timers;
 mod events;
+pub mod fly;
 mod footstep;
 mod friction;
 mod ground;

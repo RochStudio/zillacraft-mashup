@@ -7,6 +7,9 @@ pub const ZONE: &str = "minecraft:overworld";
 const PROXY_ZONE: &str = "iw4:mp_rust";
 /// The map whose level script the Minecraft world runs.
 pub const PROXY_MAP: &str = "mp_rust";
+/// Players' health there (MW2's `scr_player_maxhealth`; 100 elsewhere): its mobs and kaiju hit
+/// much harder than MW2's guns.
+pub const PLAYER_MAX_HEALTH: i32 = 300;
 
 pub fn is_minecraft(zone: &str) -> bool {
     zone.eq_ignore_ascii_case(ZONE)

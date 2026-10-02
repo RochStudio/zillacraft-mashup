@@ -11,7 +11,7 @@ use crate::{
     sync_stance_tail, update_ads_frac, update_ads_intent, update_sprint, update_stance_flags,
     update_stance_target, update_view_angles, update_view_height, walk_move,
 };
-use playerstate_iw4::pm_flags;
+use playerstate_iw4::{buttons, pm_flags};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroundTraceInput {
@@ -102,6 +102,9 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     pml.right = right;
     pml.up = up;
 
+    crate::fly::check_creative(ps, cmd);
+    let flying = crate::fly::flying(ps);
+
     mantle::clear_hint(ps);
 
     let _ads = update_ads_intent(ps, cmd, context.old_buttons, context.ads_intent);
@@ -120,13 +123,26 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     }
     let sprint_change = update_sprint(ps, cmd, context.old_buttons, sprint);
     let previous_stance = ps.pm_flags & 3;
-    update_stance_flags(
-        ps,
-        cmd,
-        collision,
-        context.bounds,
-        context.weapon_blocks_prone,
-    );
+    if flying {
+        // Crouch sinks rather than crouches: the stance sees it let go.
+        let mut stance_cmd = *cmd;
+        stance_cmd.buttons &= !(buttons::CROUCH | buttons::PRONE | buttons::STANCE_HELD);
+        update_stance_flags(
+            ps,
+            &mut stance_cmd,
+            collision,
+            context.bounds,
+            context.weapon_blocks_prone,
+        );
+    } else {
+        update_stance_flags(
+            ps,
+            cmd,
+            collision,
+            context.bounds,
+            context.weapon_blocks_prone,
+        );
+    }
     let stance_event = if ps.pm_flags & pm_flags::SPRINTING == 0 {
         match (previous_stance, ps.pm_flags & 3) {
             (1, 0) => Some(16),
@@ -175,20 +191,23 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         // Mantle root motion owns the path through the ledge. Ground solid
         // correction during that path would push the player back off it.
         complete_ground_trace(ps, &mut pml, bounds, cmd.forwardmove, collision);
-        let mut mantle_tracer = CollisionMantleTrace { collision, bounds };
-        let _ = mantle::check(
-            ps,
-            MantleCheckContext {
-                find: MantleFindLedgeContext::default(),
-                buttons: cmd.buttons,
-                forwardmove: cmd.forwardmove,
-                facing_xy: [pml.forward[0], pml.forward[1]],
-                tracemask: bounds.tracemask,
-            },
-            &mut mantle_tracer,
-            lengths,
-            root,
-        );
+        crate::fly::check_toggle(ps, &pml, cmd, context.old_buttons);
+        if !crate::fly::flying(ps) {
+            let mut mantle_tracer = CollisionMantleTrace { collision, bounds };
+            let _ = mantle::check(
+                ps,
+                MantleCheckContext {
+                    find: MantleFindLedgeContext::default(),
+                    buttons: cmd.buttons,
+                    forwardmove: cmd.forwardmove,
+                    facing_xy: [pml.forward[0], pml.forward[1]],
+                    tracemask: bounds.tracemask,
+                },
+                &mut mantle_tracer,
+                lengths,
+                root,
+            );
+        }
     }
 
     if (ps.pm_flags & pm_flags::MANTLE) != 0 {
@@ -205,7 +224,9 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
 
     drop_timers(ps, &pml);
 
-    {
+    // As the double tap left it.
+    let flying = crate::fly::flying(ps);
+    if !flying {
         let mut ladder_backend = CollisionLadderBackend { collision, bounds };
         if check_ladder_move(
             ps,
@@ -221,7 +242,9 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         }
     }
 
-    if (ps.pm_flags & pm_flags::LADDER) != 0 {
+    if flying {
+        crate::fly::fly_move(ps, &pml, cmd, bounds, collision);
+    } else if (ps.pm_flags & pm_flags::LADDER) != 0 {
         ladder_move(
             ps,
             &mut pml,
@@ -253,6 +276,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     }
 
     complete_ground_trace(ps, &mut pml, bounds, cmd.forwardmove, collision);
+    crate::fly::check_landing(ps, &pml, cmd);
 
     if (ps.pm_flags & pm_flags::LADDER) != 0 {
         ladder_footsteps(ps, pml.msec, cmd.server_time);

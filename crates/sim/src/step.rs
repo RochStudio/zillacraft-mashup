@@ -351,6 +351,11 @@ fn run_players_system(ecs: &mut World) {
             );
             crate::script::player_commands(world.ecs(), id.0, cmd.buttons, old_buttons);
             let mut cmd = *cmd;
+            // Creative mode (flying, unhurt) is a cheat.
+            if !world.cheats_enabled() {
+                cmd.buttons &= !playerstate_iw4::buttons::CREATIVE;
+            }
+            world.client_meta_mut(*id).creative = cmd.buttons & playerstate_iw4::buttons::CREATIVE != 0;
             crate::script_player::constrain_cmd(&mut world, *id, &mut cmd);
             crate::script::select_location(world.ecs(), id.0, &mut cmd, old_buttons);
             if world
@@ -360,7 +365,9 @@ fn run_players_system(ecs: &mut World) {
                 crate::remote_missile::steer(&mut world, *id, &cmd, delta.min(200));
                 cmd.forwardmove = 0;
                 cmd.rightmove = 0;
-                cmd.buttons &= playerstate_iw4::buttons::CROUCH | playerstate_iw4::buttons::PRONE;
+                cmd.buttons &= playerstate_iw4::buttons::CROUCH
+                    | playerstate_iw4::buttons::PRONE
+                    | playerstate_iw4::buttons::CREATIVE;
             }
             let commanded_move = cmd.forwardmove != 0 || cmd.rightmove != 0;
             world.set_anim_command_buttons(*id, cmd.buttons);

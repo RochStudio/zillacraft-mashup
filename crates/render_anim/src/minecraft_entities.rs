@@ -31,6 +31,8 @@ const TICK_SECONDS: f64 = 1.0 / 20.0;
 const HEALTH_SCALE: f32 = 20.0 / 100.0;
 /// The player's id in the entity world.
 const PLAYER: u64 = 0;
+/// The top byte of a bullet key for a kaiju: beyond the mob kinds the entity world has.
+const KAIJU_KEY: u64 = 0xF0;
 /// `Player.getEyeHeight` standing.
 const EYE_HEIGHT: f32 = 1.62;
 
@@ -66,6 +68,12 @@ pub(crate) struct Entities {
     /// volume, pitch.
     pub(crate) sounds: Vec<(String, DVec3, f32, f32)>,
     random: minecraftoss_player::rng::LegacyRandom,
+    /// ZillaCraft's kaiju as of the last two server ticks, for drawing between them.
+    kaiju: Vec<minecraft_terrain::kaiju_server::KaijuView>,
+    kaiju_previous: Vec<minecraft_terrain::kaiju_server::KaijuView>,
+    /// Seconds since `kaiju` came from the server thread: how far the motion from
+    /// `kaiju_previous` has got.
+    kaiju_since: f64,
 }
 
 /// What bullets and blasts count as for block loot: vanilla drops nothing
@@ -94,6 +102,8 @@ pub(crate) struct PlayerView {
     pub health: f32,
     pub yaw: f32,
     pub pitch: f32,
+    /// In creative mode: mobs pay no attention.
+    pub creative: bool,
 }
 
 impl Entities {
@@ -144,6 +154,9 @@ impl Entities {
             seed,
             sounds: Vec::new(),
             random: minecraftoss_player::rng::LegacyRandom::new((seed ^ 0x1735) as u64),
+            kaiju: Vec::new(),
+            kaiju_previous: Vec::new(),
+            kaiju_since: 0.0,
         }
     }
 
@@ -332,6 +345,10 @@ impl Entities {
     /// A bullet on a mob: an attack with the bullet's damage from where it
     /// was fired.
     pub(crate) fn shoot(&mut self, key: u64, damage: f32, from: [f64; 3], yaw: f32) {
+        if key >> 56 == KAIJU_KEY {
+            self.server.kaiju_hurt(key & ((1 << 56) - 1), damage * HEALTH_SCALE, PLAYER);
+            return;
+        }
         let Some(hit) = decode(key) else {
             return;
         };
@@ -359,6 +376,7 @@ impl Entities {
         player: &PlayerView,
     ) -> (Vec<((i32, i32, i32), Option<Block>)>, Vec<(i32, Option<[f64; 3]>)>) {
         self.clock += dt;
+        self.kaiju_since += dt;
         let ticked = self.clock >= TICK_SECONDS;
         if ticked {
             self.clock = (self.clock - TICK_SECONDS).min(TICK_SECONDS);
@@ -394,7 +412,7 @@ impl Entities {
                 offhand_horse_tempt: false,
                 alive: player.alive,
                 spectator: !player.alive,
-                attackable: player.alive,
+                attackable: player.alive && !player.creative,
             };
             self.server.tick(TickInput {
                 day_ticks,
@@ -446,6 +464,12 @@ impl Entities {
             for blast in &output.explosions {
                 let pitch = (1.0 + (self.random.next_float() - self.random.next_float()) * 0.2) * 0.7;
                 self.sounds.push(("minecraft:entity.generic.explode".to_owned(), blast.position, 4.0, pitch));
+            }
+            if let Some(views) = output.kaiju {
+                let shown = (self.kaiju_since / TICK_SECONDS).min(1.0) as f32;
+                self.kaiju_previous = minecraft_terrain::godzilla_render::blend(&self.kaiju_previous, &self.kaiju, shown);
+                self.kaiju = views;
+                self.kaiju_since = 0.0;
             }
             if let Some(mobs) = output.mobs {
                 self.world = *mobs;
@@ -530,7 +554,31 @@ impl Entities {
         for e in w.chickens().iter().filter(|e| e.chicken.health > 0.0) {
             add(MobHit::Chicken(e.id), &e.chicken.body);
         }
+        // A kaiju is far too big for one box: its body boxes all lead to it.
+        for (id, aabb) in minecraft_terrain::kaiju_server::KaijuWorld::boxes(&self.kaiju) {
+            out.push(((KAIJU_KEY << 56) | (id & ((1 << 56) - 1)), aabb));
+        }
         out
+    }
+
+    /// `kaiju godzilla`: Godzilla drops in `distance` blocks in front of the player, facing it.
+    /// `kaiju clear` removes every kaiju.
+    pub(crate) fn summon_kaiju(&mut self, kind: &str, feet: [f64; 3], yaw: f32, distance: f64) {
+        if kind == "clear" {
+            self.server.kaiju_clear();
+            return;
+        }
+        if kind != "godzilla" {
+            return;
+        }
+        let r = f64::from(yaw).to_radians();
+        let at = [feet[0] - r.sin() * distance, feet[1] + 30.0, feet[2] + r.cos() * distance];
+        self.server.summon_facing(minecraft_terrain::kaiju_server::GODZILLA.to_owned(), at, yaw + 180.0);
+    }
+
+    /// The kaiju the player is fighting, for its boss bar: (health, max).
+    pub(crate) fn kaiju_health(&self) -> Option<(f32, f32)> {
+        self.kaiju.iter().find(|k| k.death_ticks == 0).map(|k| (k.health, k.max_health))
     }
 
     /// Steps the client-side puffs, which settle on the scene's blocks.
@@ -590,6 +638,9 @@ impl Entities {
         );
         let witch_items = witch_render::append_witches(&mut out.models, w.witches().iter(), poses, atlas, light, partial);
         let poppies = golem_render::append_iron_golems(&mut out.models, w.iron_golems().iter(), poses, atlas, light, partial);
+        // Timed from when the kaiju's tick came, not by this side's tick clock.
+        let kaiju_partial = (self.kaiju_since / TICK_SECONDS).clamp(0.0, 1.0) as f32;
+        godzilla_render::append_godzillas(&mut out.models, &mut out.translucent, &self.kaiju, &self.kaiju_previous, atlas, light, kaiju_partial, self.ticks as f32 + partial);
         wolf_render::append_wolves(&mut out.models, w.wolves().iter(), poses, atlas, light, partial, w.game_time());
         flame_render::append_flames(
             &mut out.items,

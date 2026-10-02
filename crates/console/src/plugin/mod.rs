@@ -80,6 +80,7 @@ pub struct ConsolePlugin;
 impl Plugin for ConsolePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, crate::debug_move::update_skate_overlay.in_set(ClientSet::Ui));
+        app.add_systems(Update, crate::debug_move::update_boss_bar.in_set(ClientSet::Ui));
         crate::startup::install_stdin(app);
         app.init_resource::<ConsoleSettings>()
             .init_resource::<ConsoleState>()
@@ -191,7 +192,11 @@ impl Plugin for ConsolePlugin {
                         )
                             .chain(),
                         crate::user_settings::sync_binding_view,
-                        crate::user_settings::apply_master_volume,
+                        (
+                            crate::user_settings::apply_master_volume,
+                            crate::user_settings::apply_audio_device,
+                        )
+                            .chain(),
                         crate::user_settings::sync_player_name,
                         crate::user_settings::save_user_settings,
                         update_console_ui,

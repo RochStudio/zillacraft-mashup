@@ -705,7 +705,12 @@ fn apply_weapon_switch_requests(
 }
 
 pub fn sample_client_input(
-    (skate, mut minecraft): (Option<Res<frame::SkateMode>>, Option<ResMut<frame::MinecraftUi>>),
+    (skate, mut minecraft, creative, mouse): (
+        Option<Res<frame::SkateMode>>,
+        Option<ResMut<frame::MinecraftUi>>,
+        Option<Res<frame::Creative>>,
+        Option<Res<ButtonInput<MouseButton>>>,
+    ),
     time: Res<Time<Real>>,
     mut actions: ResMut<ClientActionInput>,
     mut look: ResMut<LookState>,
@@ -965,9 +970,12 @@ pub fn sample_client_input(
         // slots 3 and 4 (the D-pad's left and right) step along it.
         let slots = std::mem::take(&mut actions.client.action_slots);
         let cycles = std::mem::take(&mut actions.client.weapon_cycles);
+        // In creative the middle button (bound to switching) picks a block instead.
+        let picking = creative.as_ref().is_some_and(|c| c.on)
+            && mouse.as_ref().is_some_and(|m| m.pressed(MouseButton::Middle));
         if let Some(ui) = minecraft.as_mut() {
             let mut selected = ui.select.unwrap_or(ui.selected);
-            if !cycles.is_empty() {
+            if !cycles.is_empty() && !picking {
                 selected = if selected == 0 { 1 } else { 0 };
             }
             for slot in slots {
@@ -1135,6 +1143,9 @@ pub fn sample_client_input(
     }
     if skate.as_ref().is_some_and(|s| s.active) {
         cmd.forwardmove = 0; cmd.rightmove = 0; cmd.buttons = 0;
+    }
+    if creative.as_ref().is_some_and(|c| c.on) {
+        cmd.buttons |= playerstate_iw4::buttons::CREATIVE;
     }
     template.cmd = cmd;
     template.ready = true;
