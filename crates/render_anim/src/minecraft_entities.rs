@@ -33,6 +33,11 @@ const HEALTH_SCALE: f32 = 20.0 / 100.0;
 const PLAYER: u64 = 0;
 /// The top byte of a bullet key for a kaiju: beyond the mob kinds the entity world has.
 const KAIJU_KEY: u64 = 0xF0;
+/// The mobs a spawn egg can hatch: those the entity world simulates.
+const HATCHABLE: [&str; 23] = [
+    "bat", "bogged", "chicken", "cow", "creeper", "donkey", "enderman", "horse", "husk", "iron_golem", "mooshroom", "parched", "pig",
+    "sheep", "skeleton", "slime", "spider", "stray", "villager", "witch", "wolf", "zombie", "zombie_villager",
+];
 /// `Player.getEyeHeight` standing.
 const EYE_HEIGHT: f32 = 1.62;
 
@@ -559,6 +564,16 @@ impl Entities {
             out.push(((KAIJU_KEY << 56) | (id & ((1 << 56) - 1)), aabb));
         }
         out
+    }
+
+    /// A spawn egg used at block point `at`: its mob appears there, facing a random way, if the
+    /// entity world has that mob. Whether it did.
+    pub(crate) fn hatch(&mut self, mob: &str, at: [f64; 3]) -> bool {
+        if !HATCHABLE.contains(&mob) {
+            return false;
+        }
+        self.server.summon(format!("minecraft:{mob}"), at, None);
+        true
     }
 
     /// `kaiju godzilla`, `kaiju zilla`, `kaiju kong` or `kaiju kingkong`: it drops in `distance`

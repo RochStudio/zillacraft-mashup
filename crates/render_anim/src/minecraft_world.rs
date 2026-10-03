@@ -661,7 +661,38 @@ fn update(
             } else {
                 minecraftoss_player::GameMode::Survival
             };
-            if let Some(pos) = player.place_selected(&mut world.scene, &mut entities.inventory, mode) {
+            let egg = entities
+                .inventory
+                .slots
+                .get(entities.selected)
+                .and_then(Option::as_ref)
+                .and_then(|stack| stack.id.strip_prefix("minecraft:")?.strip_suffix("_spawn_egg").map(str::to_owned));
+            if let Some(mob) = egg {
+                // `SpawnEggItem.useOn`: the mob appears against the face clicked, and an egg is
+                // used up (none in creative).
+                if let Some(hit) = player.target(&world.scene, 5.0) {
+                    let (ox, oy, oz) = hit.face.offset();
+                    let at = [f64::from(hit.pos.0 + ox) + 0.5, f64::from(hit.pos.1 + oy), f64::from(hit.pos.2 + oz) + 0.5];
+                    if entities.hatch(&mob, at) {
+                        hand.swing = Some(0.0);
+                        if !creative.on {
+                            let slot = &mut entities.inventory.slots[entities.selected];
+                            if let Some(stack) = slot.as_mut() {
+                                stack.count -= 1;
+                                if stack.count == 0 {
+                                    *slot = None;
+                                }
+                            }
+                        }
+                    } else {
+                        let name: Vec<String> = mob
+                            .split('_')
+                            .map(|word| word[..1].to_uppercase() + &word[1..])
+                            .collect();
+                        authority.0.print_to(local.0, &format!("There is no {} in this Minecraft yet", name.join(" ")));
+                    }
+                }
+            } else if let Some(pos) = player.place_selected(&mut world.scene, &mut entities.inventory, mode) {
                 // Not into the player's own box.
                 let [fx, fy, fz] = feet;
                 let inside = (fx - 0.3) < f64::from(pos.0 + 1)
