@@ -132,8 +132,7 @@ impl Brain {
             .filter(|s| s.is_player && s.targetable && s.visible && distance(body.feet, s.feet) <= ape.s(ape::WARN_RADIUS))
             .min_by(|a, b| distance(body.feet, a.feet).total_cmp(&distance(body.feet, b.feet)))
             .copied()?;
-        let warned_lately = self.ape.last_warning.is_some_and(|at| self.ape.age - at <= ape::WARNING_MEMORY_TICKS);
-        if self.movement == Move::None && !warned_lately {
+        if self.movement == Move::None && !self.warned_lately() {
             self.ape.last_warning = Some(self.ape.age);
             self.start_ape_move(ape, Move::Roar, body, Some(&nearest), arena, effects);
         }
@@ -145,10 +144,22 @@ impl Brain {
         })
     }
 
+    /// Whether it roared a warning in the last half minute.
+    fn warned_lately(&self) -> bool {
+        self.ape.last_warning.is_some_and(|at| self.ape.age - at <= ape::WARNING_MEMORY_TICKS)
+    }
+
     /// Closing in and picking moves (`FightGoal`). The move picker works at the design size: a
     /// bigger ape judges distances in proportion to its size.
     fn fight(&mut self, ape: Ape, body: &mut Body, target: &Seen, arena: &impl Arena, walk_out: &mut Option<Walk>, effects: &mut Vec<Effect>) {
         self.look_at(body, target.eyes());
+        // It takes nobody on without a warning first (`TerritoryGoal.start`), even whoever it was
+        // summoned at or who shot it.
+        if !self.warned_lately() {
+            self.ape.last_warning = Some(self.ape.age);
+            self.start_ape_move(ape, Move::Roar, body, Some(target), arena, effects);
+            return;
+        }
         if self.ape.age >= self.ape.next_move {
             let ready = |m: Move| slot(m).is_none_or(|i| self.ape.age >= self.ape.ready_at[i]);
             let situation = Situation {

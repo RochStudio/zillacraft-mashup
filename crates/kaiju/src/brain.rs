@@ -974,6 +974,68 @@ mod tests {
         assert!(brain.enraged());
     }
 
+    /// A kaiju summoned at a player standing still at `at` (side +left, up, ahead of it), over
+    /// `ticks`: the moves it makes and what its hits were.
+    fn encounter(species: &'static Species, at: [f64; 3], ticks: u32) -> (Vec<Move>, Vec<Cause>) {
+        let mut brain = Brain::new(5, species);
+        brain.aggro(7);
+        let mut body = Body::default();
+        let seen = [Seen { id: 7, feet: at, width: 0.6, height: 1.8, on_ground: true, is_player: true, visible: true, targetable: true }];
+        let (mut walk, mut effects, mut moves, mut hits) = (None, Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..ticks {
+            let before = (brain.movement, brain.move_ticks);
+            effects.clear();
+            brain.tick(&mut body, &seen, &Flat, &mut walk, &mut effects);
+            brain.tick_boulders(&seen, &Flat, &mut effects);
+            if brain.movement != Move::None && (brain.movement != before.0 || brain.move_ticks < before.1) {
+                moves.push(brain.movement);
+            }
+            hits.extend(effects.iter().filter_map(|e| match e {
+                Effect::Hit { cause, .. } => Some(*cause),
+                _ => None,
+            }));
+            if !brain.airborne() {
+                body.feet[1] = 0.0;
+            }
+        }
+        (moves, hits)
+    }
+
+    #[test]
+    fn every_kaiju_makes_every_move_it_has_in_the_mod() {
+        use std::collections::BTreeSet;
+        // In front, beside and behind it, close and far, and up on a ledge, at each kaiju's scale.
+        let spots = |size: f64| {
+            let mut spots = Vec::new();
+            for distance in [0.25, 0.5, 1.0, 2.0, 3.0] {
+                for (side, ahead) in [(0.0, 1.0), (1.0, 0.0), (0.0, -1.0), (-0.7, -0.7)] {
+                    spots.push([side * distance * size, 0.0, ahead * distance * size]);
+                }
+            }
+            spots.push([0.0, size * 0.4, size * 0.5]);
+            spots
+        };
+        let expected: [(&'static Species, &[Move], &[Cause]); 4] = [
+            (&crate::godzilla::SPECIES, &[Move::TailSwipe, Move::Stomp], &[Cause::Claws, Cause::Tail, Cause::Stomp, Cause::AtomicBreath]),
+            (&crate::zila::SPECIES, &[Move::Roar, Move::TailSwipe, Move::Stomp, Move::Bite], &[Cause::Claws, Cause::Tail, Cause::Stomp, Cause::Bite]),
+            (&crate::kong::KONG, &[Move::Roar, Move::Swipe, Move::Slam, Move::Boulder, Move::Leap, Move::Land], &[Cause::Swipe, Cause::Shockwave, Cause::Boulder]),
+            (&crate::kong::KING_KONG, &[Move::Roar, Move::Swipe, Move::Slam, Move::Boulder, Move::Leap, Move::Land], &[Cause::Swipe, Cause::Shockwave, Cause::Boulder]),
+        ];
+        for (species, moves, causes) in expected {
+            let (mut made, mut landed) = (BTreeSet::new(), BTreeSet::new());
+            for at in spots(species.height) {
+                let (m, c) = encounter(species, at, 600);
+                made.extend(m.iter().map(|m| format!("{m:?}")));
+                landed.extend(c.iter().map(|c| format!("{c:?}")));
+            }
+            let want = |list: &[String]| list.iter().cloned().collect::<BTreeSet<_>>();
+            let moves: Vec<String> = moves.iter().map(|m| format!("{m:?}")).collect();
+            let causes: Vec<String> = causes.iter().map(|c| format!("{c:?}")).collect();
+            assert_eq!(made, want(&moves), "{}'s moves", species.name);
+            assert_eq!(landed, want(&causes), "{}'s hits", species.name);
+        }
+    }
+
     #[test]
     fn godzilla_neither_bites_nor_roars() {
         let (moves, hits, _) = fight(&crate::godzilla::SPECIES, 9.0, 200);
