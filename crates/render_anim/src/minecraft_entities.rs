@@ -587,7 +587,7 @@ impl Entities {
         near.into_iter()
             .take(most)
             .map(|k| {
-                let color = if k.enraged { kaiju::kong::ENRAGED_BOSS_COLOR } else { k.species.boss_color };
+                let color = if k.enraged { k.species.enraged_boss_color } else { k.species.boss_color };
                 (k.species.name, k.health / k.max_health, color)
             })
             .collect()

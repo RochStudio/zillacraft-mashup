@@ -109,6 +109,7 @@ pub const SPECIES: Species = Species {
     voice_pitch: 1.0,
     // `BossEvent.BossBarColor.RED`.
     boss_color: [0.85, 0.12, 0.12],
+    enraged_boss_color: [0.85, 0.12, 0.12],
     ape: None,
 };
 

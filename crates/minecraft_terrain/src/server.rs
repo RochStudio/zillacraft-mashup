@@ -1051,31 +1051,33 @@ impl ServerHandle {
         self.send(Command::SummonOrb { position, value });
     }
 
-    /// `/summon` for a mob; what it did arrives in an output. The new
-    /// mob's yaw comes from its own random (`LivingEntity`'s constructor:
-    /// `nextFloat() * (float)(Math.PI * 2)`, in degrees), seeded here from
-    /// the clock as a fresh entity's is.
     /// A summon facing a chosen way (Minecraft yaw, degrees).
     pub fn summon_facing(&mut self, kind: String, position: [f64; 3], y_rot: f32) {
         self.send(Command::Summon { kind, position, nbt: None, y_rot });
     }
 
+    /// `/summon` for a mob; what it did arrives in an output. The new
+    /// mob's yaw comes from its own random (`LivingEntity`'s constructor:
+    /// `nextFloat() * (float)(Math.PI * 2)`, in degrees), seeded here from
+    /// the clock as a fresh entity's is.
     pub fn summon(&mut self, kind: String, position: [f64; 3], nbt: Option<minecraftoss_core::nbt::Tag>) {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as i64);
         let y_rot = minecraftoss_core::random::LegacyRandom::new(nanos).next_f32() * (std::f64::consts::PI * 2.0) as f32;
         self.send(Command::Summon { kind, position, nbt, y_rot });
     }
 
-    /// Hands a player's hit or use on a mob to the server; its result
-    /// arrives in an output.
+    /// A player's hit on a kaiju, in Minecraft health before its armor.
     pub fn kaiju_hurt(&mut self, id: u64, damage: f32, attacker: u64) {
         self.send(Command::KaijuHurt { id, damage, attacker });
     }
 
+    /// `kaiju clear`: every kaiju goes.
     pub fn kaiju_clear(&mut self) {
         self.send(Command::KaijuClear);
     }
 
+    /// Hands a player's hit or use on a mob to the server; its result
+    /// arrives in an output.
     pub fn mob_action(&mut self, hit: minecraftoss_entities::world::MobHit, attack: Option<minecraftoss_entities::world::PlayerAttack>, inventory: &minecraftoss_player::inventory::Inventory, selected: usize, infinite: bool) {
         self.send(Command::MobAction { hit, attack, inventory: Box::new(inventory.clone()), selected, infinite });
     }

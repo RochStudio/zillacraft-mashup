@@ -11,10 +11,6 @@ use crate::species::Species;
 const KONG_SCALE: f64 = 14.5 / DESIGN_HEIGHT;
 const KING_KONG_SCALE: f64 = 50.0 / DESIGN_HEIGHT;
 
-/// `BossEvent.BossBarColor.GREEN`, and `RED` once enraged.
-pub const BOSS_COLOR: [f32; 3] = [0.12, 0.8, 0.18];
-pub const ENRAGED_BOSS_COLOR: [f32; 3] = [0.85, 0.12, 0.12];
-
 pub const KONG: Species = Species {
     id: "zillacraft:kong",
     name: "Kong",
@@ -58,7 +54,9 @@ pub const KONG: Species = Species {
     move_pitch: 1.15,
     voice_volume: (6.0 * KONG_SCALE) as f32,
     voice_pitch: 0.8 * 1.15,
-    boss_color: BOSS_COLOR,
+    // `BossEvent.BossBarColor.GREEN`, and `RED` once enraged.
+    boss_color: [0.12, 0.8, 0.18],
+    enraged_boss_color: [0.85, 0.12, 0.12],
     ape: Some(Ape { scale: KONG_SCALE, damage_scale: 1.0, hands: (6.5 * KONG_SCALE, 25.0 * KONG_SCALE) }),
 };
 

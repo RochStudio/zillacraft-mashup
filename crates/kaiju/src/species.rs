@@ -63,6 +63,8 @@ pub struct Species {
     pub voice_volume: f32,
     pub voice_pitch: f32,
     pub boss_color: [f32; 3],
+    /// Its bar once it is enraged (only the apes are).
+    pub enraged_boss_color: [f32; 3],
     /// An ape (Kong, King Kong): how big, for its own moves.
     pub ape: Option<Ape>,
 }

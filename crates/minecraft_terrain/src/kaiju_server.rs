@@ -282,6 +282,7 @@ impl KaijuWorld {
             // Its target fell, or a player is respawning by it: it walks off, rather than wait
             // where they respawn.
             let species = k.brain.species;
+            k.shown = Shown::default();
             let fell = fallen.iter().find(|(id, _)| k.brain.target == Some(*id)).map(|&(_, at)| at);
             let near = |at: &[f64; 3]| (at[0] - k.body.feet[0]).hypot(at[2] - k.body.feet[2]) <= species.follow_range;
             let from = fell.or_else(|| respawning.iter().copied().find(near));
@@ -294,7 +295,7 @@ impl KaijuWorld {
                 };
                 let to = [k.body.feet[0] + dx * RETREAT_DISTANCE, k.body.feet[2] + dz * RETREAT_DISTANCE];
                 if !k.brain.retreating() {
-                    let pitch = k.brain.voice_pitch();
+                    let pitch = k.brain.voice_pitch() * species.voice_pitch;
                     out.sounds.push(sound(species.voice, "roar", k.body.feet, species.move_volume * 1.5, pitch));
                 }
                 k.brain.retreat(to, RETREAT_TICKS);
@@ -322,7 +323,6 @@ impl KaijuWorld {
                 if k.death_ticks == DEATH_TICKS {
                     out.deaths.push((k.body.feet, species));
                 }
-                k.shown = Shown::default();
                 continue;
             }
             let arena = LevelArena { level, logs };
@@ -335,7 +335,6 @@ impl KaijuWorld {
             } else {
                 Self::step(k, level, walk);
             }
-            k.shown = Shown::default();
             for effect in effects {
                 apply(k, effect, level, griefing, &mut out, &seen);
             }
@@ -442,8 +441,8 @@ impl KaijuWorld {
         let before = k.body.feet;
         if let Some(walk) = walk {
             k.brain.turn_towards(&mut k.body, walk.to);
-            let wanted = (walk.to[1] - k.body.feet[2]).atan2(walk.to[0] - k.body.feet[0]).to_degrees() - 90.0;
-            let alignment = (wanted - f64::from(k.body.yaw)).to_radians().cos().max(0.0);
+            let wanted = kaiju::brain::yaw_towards(k.body.feet, [walk.to[0], 0.0, walk.to[1]]);
+            let alignment = f64::from((wanted - k.body.yaw).to_radians().cos().max(0.0));
             let yaw = f64::from(k.body.yaw).to_radians();
             let speed = species.speed * walk.speed * alignment;
             k.body.feet[0] -= yaw.sin() * speed;

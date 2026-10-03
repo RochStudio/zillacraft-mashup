@@ -8,7 +8,7 @@
 //! The host walks it (`Walk` speeds are shares of its chasing speed) and keeps its feet on the
 //! ground ([`ground_under`]); the airborne part of a leap is scripted here.
 
-use super::{Arena, Body, Brain, Cause, Effect, Seen, Walk, approach_degrees, distance, horizontal_from, normalize, scale};
+use super::{Arena, Body, Brain, Cause, Effect, Seen, Walk, approach_degrees, distance, horizontal_from, normalize, scale, to_world, yaw_towards};
 use crate::anim::Move;
 use crate::ape::{self, Ape, Boulder, Situation};
 use crate::hitboxes::Aabb;
@@ -154,11 +154,14 @@ impl Brain {
     fn fight(&mut self, ape: Ape, body: &mut Body, target: &Seen, arena: &impl Arena, walk_out: &mut Option<Walk>, effects: &mut Vec<Effect>) {
         self.look_at(body, target.eyes());
         // It takes nobody on without a warning first (`TerritoryGoal.start`), even whoever it was
-        // summoned at or who shot it.
-        if !self.warned_lately() {
-            self.ape.last_warning = Some(self.ape.age);
-            self.start_ape_move(ape, Move::Roar, body, Some(target), arena, effects);
-            return;
+        // summoned at or who shot it: once, as it takes them on, unless it has just warned them.
+        if self.roared_at != Some(target.id) {
+            self.roared_at = Some(target.id);
+            if !self.warned_lately() {
+                self.ape.last_warning = Some(self.ape.age);
+                self.start_ape_move(ape, Move::Roar, body, Some(target), arena, effects);
+                return;
+            }
         }
         if self.ape.age >= self.ape.next_move {
             let ready = |m: Move| slot(m).is_none_or(|i| self.ape.age >= self.ape.ready_at[i]);
@@ -666,8 +669,8 @@ fn ground_below(ape: Ape, arena: &impl Arena, at: [f64; 3]) -> [f64; 3] {
 
 /// A point `forward` ahead of it along `yaw` and `up` above its feet.
 fn ahead(body: &Body, yaw: f32, forward: f64, up: f64) -> [f64; 3] {
-    let r = f64::from(yaw).to_radians();
-    [body.feet[0] - r.sin() * forward, body.feet[1] + up, body.feet[2] + r.cos() * forward]
+    let (x, z) = to_world(body, forward, 0.0, yaw);
+    [x, body.feet[1] + up, z]
 }
 
 /// The way `yaw` faces, flat.
@@ -679,10 +682,6 @@ fn facing(yaw: f32) -> [f64; 3] {
 fn face(body: &mut Body, yaw: f32) {
     body.yaw = yaw;
     body.head_yaw = yaw;
-}
-
-fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
-    ((to[2] - from[2]).atan2(to[0] - from[0]).to_degrees() - 90.0) as f32
 }
 
 fn horizontal_distance(a: [f64; 3], b: [f64; 3]) -> f64 {

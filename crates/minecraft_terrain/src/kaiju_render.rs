@@ -68,7 +68,9 @@ fn boulder() -> Option<&'static Model> {
 
 /// A kaiju's model posed for this frame: the model, its pose, its scale, its skin, and an
 /// ape's glowing eyes.
-fn posed(v: &KaijuView, state: &AnimState) -> Option<(&'static Model, Vec<PartPose>, f32, &'static str, Option<&'static str>)> {
+type Posed = (&'static Model, Vec<PartPose>, f32, &'static str, Option<&'static str>);
+
+fn posed(v: &KaijuView, state: &AnimState) -> Option<Posed> {
     let species = v.species;
     if species.id == kaiju::godzilla::SPECIES.id {
         godzilla().map(|l| (&l.model, l.rig.pose(&l.model, state, false), l.scale, kaiju::pack::SKIN, None))

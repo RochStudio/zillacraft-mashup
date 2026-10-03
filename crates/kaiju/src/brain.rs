@@ -385,8 +385,7 @@ impl Brain {
 
     /// Turns it towards a point at its turn rate: ships, not zombies.
     pub fn turn_towards(&self, body: &mut Body, to: [f64; 2]) {
-        let wanted = ((to[1] - body.feet[2]).atan2(to[0] - body.feet[0]).to_degrees() - 90.0) as f32;
-        body.yaw = approach_degrees(body.yaw, wanted, self.species.turn_rate);
+        body.yaw = approach_degrees(body.yaw, yaw_towards(body.feet, [to[0], 0.0, to[1]]), self.species.turn_rate);
     }
 
     fn look_at(&self, body: &mut Body, eyes: [f64; 3]) {
@@ -809,6 +808,11 @@ fn segment_hits_body(from: [f64; 3], to: [f64; 3], s: &Seen, radius: f64) -> boo
         max: [s.feet[0] + half, s.feet[1] + s.height + radius, s.feet[2] + half],
     };
     b.contains(from) || b.clip(from, to).is_some()
+}
+
+/// The Minecraft yaw (degrees: 0 faces +Z, 90 faces -X) from `from` towards `to`.
+pub fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
+    ((to[2] - from[2]).atan2(to[0] - from[0]).to_degrees() - 90.0) as f32
 }
 
 pub fn approach_degrees(current: f32, wanted: f32, step: f32) -> f32 {
