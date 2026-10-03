@@ -110,7 +110,7 @@ pub(crate) fn spawn_showpos_hud(commands: &mut Commands, font: Handle<Font>) {
 pub(crate) fn register_debug_move_commands(registry: &mut ConsoleRegistry) {
     registry.register(crate::CommandSpec::new("skate").usage("skate [on|off|status] - local Skate gameplay (J toggles)"));
     registry.register(crate::CommandSpec::new("thirdperson").usage("thirdperson [off|behind|front] - the view F5 cycles: first person, a camera behind you, or one in front looking back"));
-    registry.register(crate::CommandSpec::new("kaiju").usage("kaiju godzilla|zilla|kong|kingkong [distance] | kaiju clear - one of ZillaCraft's kaiju drops in that far in front of you (Minecraft map; default 60 for Godzilla and King Kong, 30 for Zilla and Kong), or every kaiju goes"));
+    registry.register(crate::CommandSpec::new("kaiju").usage("kaiju godzilla|zilla|kong|kingkong|dragon [distance] | kaiju clear - one of ZillaCraft's kaiju, or the Ender Dragon, appears that far in front of you (Minecraft map; default 60 for Godzilla and King Kong, 30 for Zilla and Kong, 40 for the dragon), or every one goes"));
     registry.register(crate::CommandSpec::new("creative").usage("creative [on|off] - creative mode: double-tap jump to fly, nothing hurts you; on the Minecraft map blocks break at once, drop nothing and never run out, and middle click picks one"));
     if registry.resolve("showpos").is_none() {
         registry.register(
@@ -212,12 +212,13 @@ pub(crate) fn route_debug_move_commands(
             }
 
             "kaiju" => match (cmd.args.first().map(|a| a.to_ascii_lowercase()).as_deref(), kaiju.as_deref_mut()) {
-                (Some(kind @ ("godzilla" | "zilla" | "zila" | "kong" | "kingkong" | "king_kong")), Some(summons)) => {
+                (Some(kind @ ("godzilla" | "zilla" | "zila" | "kong" | "kingkong" | "king_kong" | "dragon" | "enderdragon" | "ender_dragon")), Some(summons)) => {
                     // Godzilla and King Kong are 50 blocks tall, Zilla and Kong 14.5: each comes in from as far as suits it.
                     let (name, default, closest) = match kind {
                         "godzilla" => ("Godzilla", 60.0, 20.0),
                         "kong" => ("Kong", 30.0, 10.0),
                         "kingkong" | "king_kong" => ("King Kong", 60.0, 20.0),
+                        "dragon" | "enderdragon" | "ender_dragon" => ("The Ender Dragon", 40.0, 10.0),
                         _ => ("Zilla", 30.0, 10.0),
                     };
                     let distance = cmd.args.get(1).and_then(|d| d.parse::<f64>().ok()).unwrap_or(default).clamp(closest, 200.0);
@@ -228,8 +229,8 @@ pub(crate) fn route_debug_move_commands(
                     summons.pending.push(("clear".to_owned(), 0.0));
                     echo("kaiju: cleared".into(), &mut console, &mut line);
                 }
-                (Some("godzilla" | "zilla" | "zila" | "kong" | "kingkong" | "king_kong" | "clear"), None) => echo("kaiju: only on the Minecraft map".into(), &mut console, &mut line),
-                _ => echo("usage: kaiju godzilla|zilla|kong|kingkong [distance] | kaiju clear".into(), &mut console, &mut line),
+                (Some("godzilla" | "zilla" | "zila" | "kong" | "kingkong" | "king_kong" | "dragon" | "enderdragon" | "ender_dragon" | "clear"), None) => echo("kaiju: only on the Minecraft map".into(), &mut console, &mut line),
+                _ => echo("usage: kaiju godzilla|zilla|kong|kingkong|dragon [distance] | kaiju clear".into(), &mut console, &mut line),
             },
             "thirdperson" => {
                 let wanted = match cmd.args.first().map(|a| a.to_ascii_lowercase()).as_deref() {

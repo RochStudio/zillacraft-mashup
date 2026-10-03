@@ -33,9 +33,9 @@ const HEALTH_SCALE: f32 = 20.0 / 100.0;
 const PLAYER: u64 = 0;
 /// The top byte of a bullet key for a kaiju: beyond the mob kinds the entity world has.
 const KAIJU_KEY: u64 = 0xF0;
-/// The mobs a spawn egg can hatch: those the entity world simulates.
-const HATCHABLE: [&str; 23] = [
-    "bat", "bogged", "chicken", "cow", "creeper", "donkey", "enderman", "horse", "husk", "iron_golem", "mooshroom", "parched", "pig",
+/// The mobs a spawn egg can hatch: those the entity world simulates, and the Ender Dragon.
+const HATCHABLE: [&str; 24] = [
+    "bat", "ender_dragon", "bogged", "chicken", "cow", "creeper", "donkey", "enderman", "horse", "husk", "iron_golem", "mooshroom", "parched", "pig",
     "sheep", "skeleton", "slime", "spider", "stray", "villager", "witch", "wolf", "zombie", "zombie_villager",
 ];
 /// `Player.getEyeHeight` standing.
@@ -76,6 +76,8 @@ pub(crate) struct Entities {
     /// ZillaCraft's kaiju as of the last two server ticks, for drawing between them.
     kaiju: Vec<minecraft_terrain::kaiju_server::KaijuView>,
     kaiju_previous: Vec<minecraft_terrain::kaiju_server::KaijuView>,
+    /// Ender Dragons as of the last server tick (each carries where it was the tick before).
+    dragons: Vec<minecraft_terrain::ender_dragon::DragonView>,
     /// Seconds since `kaiju` came from the server thread: how far the motion from
     /// `kaiju_previous` has got.
     kaiju_since: f64,
@@ -161,6 +163,7 @@ impl Entities {
             random: minecraftoss_player::rng::LegacyRandom::new((seed ^ 0x1735) as u64),
             kaiju: Vec::new(),
             kaiju_previous: Vec::new(),
+            dragons: Vec::new(),
             kaiju_since: 0.0,
         }
     }
@@ -476,6 +479,9 @@ impl Entities {
                 self.kaiju = views;
                 self.kaiju_since = 0.0;
             }
+            if let Some(dragons) = output.dragons {
+                self.dragons = dragons;
+            }
             if let Some(mobs) = output.mobs {
                 self.world = *mobs;
                 for (feet, width, height) in self.client.receive(server_mobs(&self.world)) {
@@ -563,6 +569,13 @@ impl Entities {
         for (id, aabb) in minecraft_terrain::kaiju_server::KaijuWorld::boxes(&self.kaiju) {
             out.push(((KAIJU_KEY << 56) | (id & ((1 << 56) - 1)), aabb));
         }
+        // A dragon's parts each lead to it (the head hurts it most).
+        for dragon in self.dragons.iter().filter(|d| d.death_ticks == 0) {
+            for (part, aabb) in dragon.parts.iter().enumerate() {
+                let id = minecraft_terrain::ender_dragon::part_id(dragon.id, part);
+                out.push(((KAIJU_KEY << 56) | (id & ((1 << 56) - 1)), *aabb));
+            }
+        }
         out
     }
 
@@ -577,16 +590,22 @@ impl Entities {
     }
 
     /// `kaiju godzilla`, `kaiju zilla`, `kaiju kong` or `kaiju kingkong`: it drops in `distance`
-    /// blocks in front of the player, facing it. `kaiju clear` removes every kaiju.
+    /// blocks in front of the player, facing it. `kaiju dragon` hatches the Ender Dragon there.
+    /// `kaiju clear` removes every one.
     pub(crate) fn summon_kaiju(&mut self, kind: &str, feet: [f64; 3], yaw: f32, distance: f64) {
         if kind == "clear" {
             self.server.kaiju_clear();
             return;
         }
+        let r = f64::from(yaw).to_radians();
+        if matches!(kind, "dragon" | "enderdragon" | "ender_dragon") {
+            let at = [feet[0] - r.sin() * distance, feet[1] + 8.0, feet[2] + r.cos() * distance];
+            self.server.summon_facing("minecraft:ender_dragon".to_owned(), at, yaw);
+            return;
+        }
         let Some(species) = kaiju::species::named(kind) else {
             return;
         };
-        let r = f64::from(yaw).to_radians();
         let at = [feet[0] - r.sin() * distance, feet[1] + species.height * 0.6, feet[2] + r.cos() * distance];
         self.server.summon_facing(species.id.to_owned(), at, yaw + 180.0);
     }
@@ -597,15 +616,17 @@ impl Entities {
     /// chunks).
     pub(crate) fn kaiju_bosses(&self, feet: [f64; 3], most: usize) -> Vec<(&'static str, f32, [f32; 3])> {
         let away = |at: [f64; 3]| (at[0] - feet[0]).hypot(at[2] - feet[2]);
-        let mut near: Vec<_> = self.kaiju.iter().filter(|k| k.death_ticks == 0 && away(k.feet) <= 160.0).collect();
-        near.sort_by(|a, b| away(a.feet).total_cmp(&away(b.feet)));
-        near.into_iter()
-            .take(most)
-            .map(|k| {
-                let color = if k.enraged { k.species.enraged_boss_color } else { k.species.boss_color };
-                (k.species.name, k.health / k.max_health, color)
-            })
-            .collect()
+        let kaiju = self.kaiju.iter().filter(|k| k.death_ticks == 0).map(|k| {
+            let color = if k.enraged { k.species.enraged_boss_color } else { k.species.boss_color };
+            (k.feet, (k.species.name, k.health / k.max_health, color))
+        });
+        // The dragon's bar is purple (`BossBarColor.PINK`), for as long as it lives.
+        let dragons = self.dragons.iter().filter(|d| d.health > 0.0).map(|d| {
+            (d.position, ("Ender Dragon", d.health / d.max_health, minecraft_terrain::ender_dragon::BOSS_COLOR))
+        });
+        let mut near: Vec<_> = kaiju.chain(dragons).filter(|(at, _)| away(*at) <= 160.0).collect();
+        near.sort_by(|a, b| away(a.0).total_cmp(&away(b.0)));
+        near.into_iter().take(most).map(|(_, bar)| bar).collect()
     }
 
     /// Steps the client-side puffs, which settle on the scene's blocks.
@@ -668,6 +689,7 @@ impl Entities {
         // Timed from when the kaiju's tick came, not by this side's tick clock.
         let kaiju_partial = (self.kaiju_since / TICK_SECONDS).clamp(0.0, 1.0) as f32;
         kaiju_render::append_kaiju(&mut out.models, &mut out.translucent, &self.kaiju, &self.kaiju_previous, atlas, light, kaiju_partial, self.ticks as f32 + partial);
+        ender_dragon_render::append_dragons(&mut out.models, &mut out.translucent, &self.dragons, atlas, light, kaiju_partial);
         wolf_render::append_wolves(&mut out.models, w.wolves().iter(), poses, atlas, light, partial, w.game_time());
         flame_render::append_flames(
             &mut out.items,

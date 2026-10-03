@@ -16,6 +16,9 @@ RochStudio's Minecraft mod ZillaCraft, and more to fight them with.
 - **King Kong**: Kong at Godzilla's size, 50 blocks tall, with the same moves at his scale.
 - Each kaiju's model, textures, sounds, moves and stats come from ZillaCraft. A red warning marks the ground before every move, and each one has a boss bar. Godzilla and Zilla crush the terrain they walk through; the apes wade through it.
 - Guns, grenades, rockets, killstreaks and the knife all hurt the kaiju, and Minecraft's mobs too.
+- **The Ender Dragon**, behaving as vanilla's does: hatch it from its spawn egg and it circles where it hatched, strafes you with fireballs that leave clouds of dragon's breath, lands to roar and breathe fire, charges anyone keeping their distance, and smashes through whatever it flies into. Its head takes full damage; shoot it down for 500 experience.
+- **Spawn eggs** hatch their mobs: every mob the Minecraft world has, and the dragon.
+- **F5 third person**, as in Minecraft: behind you, in front looking back, or first person.
 - **Creative mode**: double-tap jump to fly, nothing hurts you, blocks break instantly and never run out, middle-click picks a block, and Minecraft's creative inventory opens with **E**, with its tabs and search.
 - Real inventory icons for every Minecraft item, chests, banners, shulker boxes, heads and shields included.
 - Fairer spawns on the Minecraft map: 300 health, and a kaiju walks off after a kill instead of waiting at your spawn.
@@ -29,9 +32,11 @@ Console commands (open the console with the backtick key, `` ` ``):
 | `kaiju zilla [distance]` | Zilla drops in (default 30) |
 | `kaiju kong [distance]` | Kong drops in (default 30) |
 | `kaiju kingkong [distance]` | King Kong drops in (default 60) |
+| `kaiju dragon [distance]` | The Ender Dragon hatches there (default 40) |
 | `kaiju clear` | Every kaiju goes |
 | `creative [on\|off]` | Creative mode |
 | `give <item> [count]` | Minecraft items, such as `give diamond_block 64` |
+| `thirdperson [off\|behind\|front]` | The view F5 cycles |
 
 ## The base game
 

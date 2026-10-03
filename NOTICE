@@ -80,6 +80,10 @@ crates/minecraft_terrain/src/special_model.rs — the box sizes and texture
   inventory icons can be drawn from Mojang's textures at run time. No
   Minecraft code or textures are included.
 
+crates/minecraft_terrain/assets/ender_dragon.json — the Ender Dragon model's
+  box sizes and texture offsets, measured from the game the same way; its
+  texture comes from Mojang's files at run time.
+
 --------------------------------------------------------------------------------
 References consulted during development
 --------------------------------------------------------------------------------

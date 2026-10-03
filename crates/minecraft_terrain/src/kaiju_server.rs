@@ -29,7 +29,7 @@ const RETREAT_DISTANCE: f64 = 110.0;
 const RETREAT_TICKS: u32 = 1200;
 /// MW2 players have 100 health and no armor: kaiju blows are scaled for them (the mod's
 /// numbers are for Minecraft players in diamond armor), and a blast hurts at most this much.
-const PLAYER_SHARE_MELEE: f32 = 0.5;
+pub(crate) const PLAYER_SHARE_MELEE: f32 = 0.5;
 const PLAYER_SHARE_BREATH: f32 = 0.3;
 const PLAYER_BLAST_MAX: f32 = 14.0;
 /// For this long after a blow, a player only takes what a harder one adds: Minecraft's hurt
@@ -104,6 +104,8 @@ pub struct KaijuTick {
     pub sounds: Vec<MobSound>,
     /// Where each one that died fell, and what it was, for its drops.
     pub deaths: Vec<([f64; 3], &'static Species)>,
+    /// Experience let go at a point (a dying dragon's, as it goes).
+    pub experience: Vec<([f64; 3], i32)>,
 }
 
 /// A player as the kaiju see it.
@@ -127,6 +129,8 @@ pub struct KaijuWorld {
     grace: std::collections::HashMap<u64, u32>,
     /// Players just hurt: ticks of hurt cooldown left, and the blow that started it.
     cooldown: std::collections::HashMap<u64, (u32, f32)>,
+    /// Ender Dragons, which live outside the entity world as the kaiju do.
+    dragons: Vec<crate::ender_dragon::EnderDragon>,
 }
 
 impl KaijuWorld {
@@ -158,19 +162,38 @@ impl KaijuWorld {
         id
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.list.is_empty()
+    /// An Ender Dragon hatched at `at` (its spawn egg), circling there.
+    pub fn spawn_dragon(&mut self, at: [f64; 3], yaw: f32) -> u64 {
+        let id = FIRST_ID + self.next_id;
+        // Its parts take the ids after its own.
+        self.next_id += crate::ender_dragon::IDS;
+        self.dragons.push(crate::ender_dragon::EnderDragon::new(id, at, yaw));
+        id
     }
 
-    /// `kaiju clear`: every kaiju goes.
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty() && self.dragons.is_empty()
+    }
+
+    /// `kaiju clear`: every kaiju goes (and every dragon).
     pub fn clear(&mut self) -> usize {
-        let count = self.list.len();
+        let count = self.list.len() + self.dragons.len();
         self.list.clear();
+        self.dragons.clear();
         count
     }
 
-    /// A hit from `attacker` for `damage` Minecraft health, before its armor.
+    pub fn dragon_views(&self) -> Vec<crate::ender_dragon::DragonView> {
+        self.dragons.iter().map(crate::ender_dragon::EnderDragon::view).collect()
+    }
+
+    /// A hit from `attacker` for `damage` Minecraft health, before its armor, on the part of
+    /// a dragon or kaiju with this id.
     pub fn hurt(&mut self, id: u64, damage: f32, attacker: u64) {
+        if let Some(dragon) = self.dragons.iter_mut().find(|d| d.owns(id)) {
+            dragon.hurt(id, damage, attacker);
+            return;
+        }
         let Some(k) = self.list.iter_mut().find(|k| k.id == id && k.health > 0.0) else {
             return;
         };
@@ -344,6 +367,10 @@ impl KaijuWorld {
             }
         }
         self.list.retain(|k| k.death_ticks < DEATH_TICKS);
+        for dragon in &mut self.dragons {
+            dragon.tick(level, &seen, griefing, &mut out);
+        }
+        self.dragons.retain(|d| !d.gone());
         let cooldown = &mut self.cooldown;
         out.player_hits.retain_mut(|hit| match cooldown.get_mut(&hit.player_id) {
             Some((_, last)) if hit.damage <= *last => false,
@@ -613,7 +640,7 @@ fn leaves(level: &Level<'static>, pos: BlockPos) -> bool {
 
 /// The first solid block a line passes through (a voxel walk), as the point where it enters,
 /// passing through whatever `see_through` says.
-fn first_solid(level: &Level<'static>, from: [f64; 3], to: [f64; 3], see_through: impl Fn(BlockPos) -> bool) -> Option<[f64; 3]> {
+pub(crate) fn first_solid(level: &Level<'static>, from: [f64; 3], to: [f64; 3], see_through: impl Fn(BlockPos) -> bool) -> Option<[f64; 3]> {
     let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
     if length < 1e-9 {

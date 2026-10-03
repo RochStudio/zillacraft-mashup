@@ -265,7 +265,7 @@ fn append_boulder(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push_quads(mesh: &mut ChunkMesh, quads: &[Quad], feet: [f64; 3], region: [f32; 4], tint: [f32; 3], alpha: f32, sky: f32, block: f32, shaded: bool) {
+pub(crate) fn push_quads(mesh: &mut ChunkMesh, quads: &[Quad], feet: [f64; 3], region: [f32; 4], tint: [f32; 3], alpha: f32, sky: f32, block: f32, shaded: bool) {
     let origin = Vec3::new(feet[0] as f32, feet[1] as f32, feet[2] as f32);
     for q in quads {
         let p: [Vec3; 4] = q.positions.map(Vec3::from_array);
@@ -306,7 +306,7 @@ fn push_beam(mesh: &mut ChunkMesh, region: [f32; 4], from: [f64; 3], to: [f64; 3
 }
 
 /// A flat mark lying on the ground at `at`.
-fn push_ground_mark(mesh: &mut ChunkMesh, region: [f32; 4], at: [f64; 3], size: f32, color: [f32; 3]) {
+pub(crate) fn push_ground_mark(mesh: &mut ChunkMesh, region: [f32; 4], at: [f64; 3], size: f32, color: [f32; 3]) {
     let c = Vec3::new(at[0] as f32, at[1] as f32 + 0.05, at[2] as f32);
     let h = size / 2.0;
     let corners = [c + Vec3::new(-h, 0.0, -h), c + Vec3::new(-h, 0.0, h), c + Vec3::new(h, 0.0, h), c + Vec3::new(h, 0.0, -h)];

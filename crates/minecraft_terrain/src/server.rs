@@ -622,6 +622,10 @@ impl ServerSim {
             self.kaiju.spawn(species, position, y_rot, Some(0));
             return Ok(());
         }
+        if kind == "minecraft:ender_dragon" {
+            self.kaiju.spawn_dragon(position, y_rot);
+            return Ok(());
+        }
         let tag = self.level.summon_mob(kind, position, nbt, y_rot)?;
         // A new brain reads the schedule for the time it is.
         self.mobs.set_day_time(self.level.overworld_clock());
@@ -934,6 +938,8 @@ pub struct Output {
     pub bone_meal_used: Vec<BlockPos>,
     /// The kaiju the client draws, after a tick.
     pub kaiju: Option<Vec<crate::kaiju_server::KaijuView>>,
+    /// The Ender Dragons the client draws, after a tick.
+    pub dragons: Option<Vec<crate::ender_dragon::DragonView>>,
     /// How many commands the server has handled so far.
     pub handled: u64,
     /// The last tick's phases, light solves and total milliseconds.
@@ -1223,8 +1229,12 @@ fn server_loop(mut sim: ServerSim, commands: std::sync::mpsc::Receiver<Command>,
                         for (at, species) in tick.deaths {
                             sim.drop_kaiju_loot(at, species);
                         }
+                        for (at, amount) in tick.experience {
+                            sim.award_experience(at, amount);
+                        }
                     }
                     out.kaiju = Some(sim.kaiju.views());
+                    out.dragons = Some(sim.kaiju.dragon_views());
                     sim.level.last_tick_phases[5] += mobs_started.elapsed().as_secs_f64() * 1000.0;
                     out.mobs = Some(Box::new(sim.tracked_mobs(input.tracking.0, input.tracking.1)));
                     let pickup_feet = input.pickup.as_ref().map(|(feet, _, _)| *feet);
@@ -1296,6 +1306,54 @@ mod tests {
             flowed += server.take_changes().len();
         }
         assert!(flowed > 0, "water should fall from the source");
+    }
+
+    /// A hatched Ender Dragon keeps to its fight round where it hatched, goes after the player
+    /// there (a fireball, or landing to breathe), and when killed flies home, dies over ten
+    /// seconds and lets go of its 500 experience.
+    #[test]
+    fn the_ender_dragon_fights_round_its_hatching_and_dies() {
+        let Ok(paths) = DataPaths::discover() else { return };
+        let Ok(registries) = Registries::load(&paths) else { return };
+        let registries = Arc::new(registries);
+        let worldgen = Arc::new(WorldGen::new(Arc::new(TerrainGenerator::overworld(registries.clone(), 0).unwrap())).unwrap());
+        let states = Arc::new(BlockStates::new(registries.clone(), 0, -64, 384).unwrap());
+        let mut map = ChunkMap::with_worldgen(worldgen.clone(), 2, 4);
+        let mut server = ServerSim::new(worldgen, states, "minecraft:overworld");
+        for x in -4..=4 {
+            for z in -4..=4 {
+                server.load_chunk(&map.load_now(ChunkPos::new(x, z)));
+            }
+        }
+        let ground = |server: &ServerSim, x, z| minecraftoss_generator::feature::World::height_at(&server.level, minecraftoss_core::chunk::HeightmapKind::MotionBlocking, x, z);
+        let feet = [8.5, f64::from(ground(&server, 8, 0)), 0.5];
+        let player = crate::kaiju_server::KaijuPlayer { id: 0, feet, alive: true, attackable: true };
+        let dragon = server.kaiju.spawn_dragon([0.5, f64::from(ground(&server, 0, 0)), 0.5], 0.0);
+        let (mut shots, mut sat, mut hits, mut furthest) = (0, false, 0, 0.0f64);
+        for _ in 0..4000 {
+            let tick = server.kaiju.tick(&mut server.level, &[player], true);
+            shots += tick.sounds.iter().filter(|s| s.event == "minecraft:entity.ender_dragon.shoot").count();
+            hits += tick.player_hits.len();
+            let view = server.kaiju.dragon_views().remove(0);
+            sat |= view.sitting;
+            furthest = furthest.max(view.position[0].hypot(view.position[2]));
+        }
+        assert!(shots > 0 || sat, "it went after the player: {shots} fireballs, sat {sat}");
+        assert!(hits > 0, "and hurt them");
+        assert!(furthest < 150.0, "it kept to its fight: {furthest:.0} blocks out at most");
+
+        // Killed in the air, it flies home to die.
+        server.kaiju.hurt(crate::ender_dragon::part_id(dragon, 0), 1000.0, 0);
+        let mut experience = 0;
+        for _ in 0..3000 {
+            let tick = server.kaiju.tick(&mut server.level, &[player], true);
+            experience += tick.experience.iter().map(|&(_, xp)| xp).sum::<i32>();
+            if server.kaiju.dragon_views().is_empty() {
+                break;
+            }
+        }
+        assert!(server.kaiju.dragon_views().is_empty(), "it died and went");
+        assert_eq!(experience, 500);
     }
 
     /// A kaiju rests on whatever is under any part of it, as a mob's box does: a hole narrower
