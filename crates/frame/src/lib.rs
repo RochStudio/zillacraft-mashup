@@ -40,5 +40,7 @@ pub mod creative;
 pub use creative::Creative;
 pub mod kaiju;
 pub use kaiju::KaijuSummons;
+pub mod third_person;
+pub use third_person::{ThirdPerson, cycle_third_person, third_person};
 pub mod minecraft_ui;
 pub use minecraft_ui::{InventoryPuppet, McClick, McSlot, McStack, MinecraftUi};

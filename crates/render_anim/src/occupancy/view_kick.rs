@@ -21,7 +21,8 @@ use crate::anim::view_kick_state::{KickParams, ViewKickState, add_kick_to_viewan
 use crate::anim::view_sway::ViewSwayState;
 use crate::occupancy::remote_body::RemotePlayer;
 use crate::occupancy::third_person::{
-    death_watch_camera, presented_is_third_person, remote_missile_camera,
+    CG_THIRD_PERSON_ANGLE_MP, death_watch_camera, presented_is_third_person, remote_missile_camera,
+    third_person_camera,
 };
 use render_scene::{FlyCamera, FpvLens, SimCamera, transform_from_iw_view};
 use render_scene::{WorldCameraPose, WorldScriptModelInstance};
@@ -338,8 +339,19 @@ pub fn sync_camera_from_presented(
         return;
     }
     if presented_is_third_person(&presented, local.0, view.in_killcam()) {
-        let Some(pose) = death_watch_camera(&presented, local.0, death_cam_clip.0.as_deref())
-        else {
+        // F5's view while alive (the death cam watches the killer instead).
+        let f5 = match frame::third_person() {
+            frame::ThirdPerson::Behind => Some(CG_THIRD_PERSON_ANGLE_MP),
+            frame::ThirdPerson::InFront => Some(180.0),
+            frame::ThirdPerson::Off => None,
+        }
+        .filter(|_| ps.pm_type < playerstate_iw4::PM_TYPE_DEAD && !view.in_killcam());
+        let clip = death_cam_clip.0.as_deref();
+        let pose = match f5 {
+            Some(angle) => third_person_camera(&presented, local.0, clip, angle),
+            None => death_watch_camera(&presented, local.0, clip),
+        };
+        let Some(pose) = pose else {
             return;
         };
         let pose = earthquake_pose(pose, &presented, clock.time());

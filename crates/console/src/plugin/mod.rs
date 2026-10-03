@@ -364,6 +364,10 @@ fn publish_client_action_input(
     if !skate.input_blocked && (keys.just_pressed(KeyCode::KeyJ) || sticks_clicked) {
         skate.toggle_requested = true;
     }
+    // F5 cycles the view: first person, behind the player, in front of them.
+    if !skate.input_blocked && keys.just_pressed(KeyCode::F5) {
+        frame::cycle_third_person();
+    }
     let modal_captured = console.open
         || script_menu
         || inventory_open

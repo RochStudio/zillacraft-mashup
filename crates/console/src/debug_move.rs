@@ -109,6 +109,7 @@ pub(crate) fn spawn_showpos_hud(commands: &mut Commands, font: Handle<Font>) {
 
 pub(crate) fn register_debug_move_commands(registry: &mut ConsoleRegistry) {
     registry.register(crate::CommandSpec::new("skate").usage("skate [on|off|status] - local Skate gameplay (J toggles)"));
+    registry.register(crate::CommandSpec::new("thirdperson").usage("thirdperson [off|behind|front] - the view F5 cycles: first person, a camera behind you, or one in front looking back"));
     registry.register(crate::CommandSpec::new("kaiju").usage("kaiju godzilla|zilla|kong|kingkong [distance] | kaiju clear - one of ZillaCraft's kaiju drops in that far in front of you (Minecraft map; default 60 for Godzilla and King Kong, 30 for Zilla and Kong), or every kaiju goes"));
     registry.register(crate::CommandSpec::new("creative").usage("creative [on|off] - creative mode: double-tap jump to fly, nothing hurts you; on the Minecraft map blocks break at once, drop nothing and never run out, and middle click picks one"));
     if registry.resolve("showpos").is_none() {
@@ -230,6 +231,23 @@ pub(crate) fn route_debug_move_commands(
                 (Some("godzilla" | "zilla" | "zila" | "kong" | "kingkong" | "king_kong" | "clear"), None) => echo("kaiju: only on the Minecraft map".into(), &mut console, &mut line),
                 _ => echo("usage: kaiju godzilla|zilla|kong|kingkong [distance] | kaiju clear".into(), &mut console, &mut line),
             },
+            "thirdperson" => {
+                let wanted = match cmd.args.first().map(|a| a.to_ascii_lowercase()).as_deref() {
+                    None => None,
+                    Some("off" | "0") => Some(frame::ThirdPerson::Off),
+                    Some("behind" | "back" | "1") => Some(frame::ThirdPerson::Behind),
+                    Some("front" | "2") => Some(frame::ThirdPerson::InFront),
+                    Some(_) => {
+                        echo("usage: thirdperson [off|behind|front]".into(), &mut console, &mut line);
+                        continue;
+                    }
+                };
+                let mut now = frame::cycle_third_person();
+                while wanted.is_some_and(|w| w != now) {
+                    now = frame::cycle_third_person();
+                }
+                echo(format!("thirdperson: {now:?}"), &mut console, &mut line);
+            }
             "creative" => {
                 let Some(creative) = creative.as_deref_mut() else {
                     echo("creative: unavailable here".into(), &mut console, &mut line);

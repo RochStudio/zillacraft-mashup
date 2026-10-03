@@ -263,6 +263,11 @@ impl SimWorld {
         }
     }
 
+    /// `iPrintLnBold` to one player: `text` in the middle of their screen.
+    pub fn print_to(&mut self, id: ClientId, text: &str) {
+        self.frame().push_print(crate::PendingPrint { recipient: Some(id), bold: true, template: text.to_owned(), arg: String::new() });
+    }
+
     pub fn set_external_motion(&mut self, id: ClientId, enabled: bool) {
         if enabled { self.frame().external_motion.insert(id); } else { self.frame().external_motion.remove(&id); }
     }

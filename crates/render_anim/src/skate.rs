@@ -449,6 +449,15 @@ fn update(
         }
         if host.send.is_none() {
             diag::warn!(World, "Skate session unavailable: {}", mode.status);
+            // Say why on screen, rather than J doing nothing.
+            let why = if std::env::var_os("IW4L_SKATE_ASSETS").is_none() {
+                "Skating is off: Skate 3 mode needs your own Xbox 360 Skate 3 (default.xex and its data folder)".to_owned()
+            } else if mode.status.is_empty() {
+                "Skating isn't ready yet".to_owned()
+            } else {
+                format!("Skating unavailable: {}", mode.status)
+            };
+            authority.0.print_to(local.0, &why);
             return;
         }
         host.enter_requested = true;

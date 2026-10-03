@@ -599,6 +599,13 @@ impl VoxelWorld {
     }
 }
 
+/// How far (0..1) a box `half` map units across each way gets from `start` to `end` before the
+/// block world stops it: 1 where nothing does, or there is no block world. For a camera
+/// pulled back from the player's eye.
+pub fn camera_fraction(start: [f32; 3], end: [f32; 3], half: f32) -> f32 {
+    trace(start, end, [-half; 3], [half; 3]).fraction
+}
+
 /// A box swept from `start` to `end` in map space against the block world.
 pub(crate) fn trace(
     start: [f32; 3],

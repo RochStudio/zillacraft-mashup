@@ -29,7 +29,7 @@ pub fn presented_is_third_person(
         pm_type: ps.pm_type,
         other_flags: ps.other_flags,
         link_flags: ps.link_flags,
-        cg_third_person: false,
+        cg_third_person: frame::third_person() != frame::ThirdPerson::Off,
         in_killcam,
         killcam_mode: KillCamMode::Mode0,
     })
@@ -61,8 +61,22 @@ pub fn death_watch_camera(
     local: ClientId,
     clip: Option<&ClipCollision>,
 ) -> Option<WorldCameraPose> {
+    third_person_camera(presented, local, clip, CG_THIRD_PERSON_ANGLE_MP)
+}
+
+/// `CG_OffsetThirdPersonView`: the camera `cg_thirdPersonRange` back from the player's eye,
+/// swung `angle` degrees round from behind them (180 puts it in front, looking back), pulled
+/// in short of walls in the map's brushes and the Minecraft world's blocks alike.
+pub fn third_person_camera(
+    presented: &PresentedSnapshot,
+    local: ClientId,
+    clip: Option<&ClipCollision>,
+    angle: f32,
+) -> Option<WorldCameraPose> {
     let ps = presented.player(local)?;
-    let clip = clip?;
+    if clip.is_none() && !sim::voxel::active() {
+        return None;
+    }
     let offset = presented.view_offset();
     let yaw = presented
         .snapshot()?
@@ -73,14 +87,11 @@ pub fn death_watch_camera(
 
     let half = CG_CAMERA_PULLBACK_BOX_HALF;
     let trace = |start: [f32; 3], end: [f32; 3]| {
-        clip.sweep_box(
-            start,
-            end,
-            [-half, -half, -half],
-            [half, half, half],
-            CG_CAMERA_PULLBACK_CLIPMASK,
-        )
-        .fraction
+        let brushes = clip.map_or(1.0, |clip| {
+            clip.sweep_box(start, end, [-half, -half, -half], [half, half, half], CG_CAMERA_PULLBACK_CLIPMASK)
+                .fraction
+        });
+        brushes.min(sim::voxel::camera_fraction(start, end, half))
     };
     let view = offset_third_person_view(
         OffsetThirdPersonViewInputs {
@@ -97,13 +108,22 @@ pub fn death_watch_camera(
             corpse_j_mainroot: None,
             other_flags: ps.other_flags,
             delta_time: ps.delta_time,
-            cg_third_person_angle: CG_THIRD_PERSON_ANGLE_MP,
+            cg_third_person_angle: angle,
             cg_third_person_range: CG_THIRD_PERSON_RANGE_DEFAULT,
         },
         trace,
     );
+    // Turned round to face the player, the camera looks at their head.
+    let angles = if (angle - 180.0).abs() < 90.0 {
+        let eye = [ps.origin[0] + offset[0], ps.origin[1] + offset[1], ps.origin[2] + offset[2] + ps.view_height_current];
+        let d = [eye[0] - view.origin[0], eye[1] - view.origin[1], eye[2] - view.origin[2]];
+        let pitch = -d[2].atan2(d[0].hypot(d[1])).to_degrees();
+        [pitch, d[1].atan2(d[0]).to_degrees(), 0.0]
+    } else {
+        view.angles
+    };
     Some(WorldCameraPose {
         origin: view.origin,
-        angles: view.angles,
+        angles,
     })
 }

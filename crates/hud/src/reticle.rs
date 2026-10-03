@@ -153,7 +153,7 @@ pub(crate) fn update_reticle(
             pm_type: ps.pm_type,
             other_flags: ps.other_flags,
             link_flags: ps.link_flags,
-            cg_third_person: false,
+            cg_third_person: frame::third_person() != frame::ThirdPerson::Off,
             in_killcam: view.in_killcam(),
             killcam_mode: KillCamMode::Mode0,
         });
