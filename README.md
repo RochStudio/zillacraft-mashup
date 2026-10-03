@@ -8,6 +8,36 @@ which brought Modern Warfare 2, Skate 3 and Minecraft together in one game on
 below "The base game" is chasmlol's and IW4L's work. This fork adds the kaiju from
 RochStudio's Minecraft mod ZillaCraft, and more to fight them with.
 
+## How to play
+
+### What you need
+
+- A 64-bit **Windows 10 or 11** PC.
+- **Call of Duty: Modern Warfare 2 (2009)** for PC, installed. Only the Steam version is tested. No game files come with this download: the game reads them from your copy.
+- An **internet connection the first time** you play. The game downloads Minecraft's own files from Mojang then (about 125 MB). You don't need Minecraft installed.
+- Optional, only for Skate 3 mode: the **Xbox 360 version of Skate 3**, extracted (its `default.xex` with the `data` folder beside it), and a controller. Everything else works without it.
+
+### Step by step
+
+1. **Download** `ZillaCraft-Mashup-windows-x64.zip` from the [latest release](https://github.com/RochStudio/zillacraft-mashup/releases/latest).
+2. **Extract it**: right-click the zip, choose **Extract All**, and put the folder somewhere you can write to, such as `Documents`. Not in `Program Files`.
+3. **Start the game**: open the extracted `ZillaCraft-Mashup` folder and double-click **`iw4l.exe`**.
+   If Windows says "Windows protected your PC", click **More info**, then **Run anyway**. It warns about any program that isn't signed.
+4. **Show it your MW2**: it finds a Steam copy by itself and asks you to confirm it. Otherwise, select your MW2 folder (the one with `iw4mp.exe` and the `zone` folder in it).
+5. **Answer the Skate 3 question**: choose **No**, unless you have Skate 3 for Xbox 360 extracted. Then choose **Yes** and select its `default.xex`.
+6. **Go to the Minecraft world**: at the main menu, choose **Create Game**, pick the **Minecraft** tab in the map list, select **overworld** and start. The first time, the game has to download Minecraft's files before the map opens; give it a minute.
+   From then on, double-clicking **`Minecraft World.bat`** in the same folder takes you straight there.
+7. **Bring in a kaiju**: press the **`` ` ``** key (under Esc) to open the console, type `kaiju godzilla` and press **Enter**. Godzilla drops in 60 blocks in front of you. Close the console with **`` ` ``** again, and fight.
+   The others are `kaiju zilla`, `kaiju kong`, `kaiju kingkong` and `kaiju dragon`; `kaiju clear` sends them all away. Type `creative on` first if you'd rather watch than fight.
+
+Steps 4 and 5 happen only the first time. After that, double-click `Minecraft World.bat` (or `iw4l.exe` for the menu).
+
+### If something goes wrong
+
+- **"VCRUNTIME140.dll was not found"**: install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe), then start the game again.
+- **Wrong MW2 folder, or you want to change your Skate 3 answer**: delete the `.env` file next to `iw4l.exe` and start the game again; it asks again.
+- **The Minecraft world doesn't load the first time**: the download starts when the game opens and keeps going in the background. Wait a minute at the menu and start the map again. If it still fails, check your internet connection; the files go into `iw4l-artifacts\minecraft-26.3` next to the game, and deleting that folder downloads them again.
+
 ## What this fork adds
 
 - **Godzilla** (Godzilla Minus One): a 50-block boss with his atomic breath, tail swipe, stomp and claws.
@@ -38,6 +68,16 @@ Console commands (open the console with the backtick key, `` ` ``):
 | `give <item> [count]` | Minecraft items, such as `give diamond_block 64` |
 | `thirdperson [off\|behind\|front]` | The view F5 cycles |
 
+## Build it yourself
+
+You need [Rust](https://rustup.rs) (the repository pins its version) and, on Windows, the Visual Studio C++ build tools that rustup offers to install. Then, in the repository folder:
+
+```
+cargo build --profile play -p launcher
+```
+
+The game is `target\play\iw4l.exe`; run it from the repository folder (`target\play\iw4l.exe map minecraft:overworld` goes straight to the Minecraft world). More in [docs/BUILD.md](docs/BUILD.md).
+
 ## The base game
 
 Modern Warfare 2, Skate 3 and Minecraft in one game, from
@@ -62,21 +102,7 @@ Modern Warfare 2, Skate 3 and Minecraft in one game, from
 - The minimap shows the Minecraft world around you.
 - Skate 3 mode works here too, with full block collision.
 
-You don't need Minecraft installed. The first time the game starts, it downloads Minecraft 26.3's own files (textures, sounds, world data) straight from Mojang's official servers, the same way the Minecraft launcher does. That's about 125 MB, into `iw4l-artifacts/minecraft-26.3`. After that it plays offline. Nothing from Minecraft is included in this repository.
-
-## What you'll need
-
-- **MW2**, only tested with the Steam version.
-- Optional, for Skate 3 mode: the **Xbox 360 version of Skate 3** (the extracted `default.xex` with its `data` folder) and a controller. Without it, everything else still works; skating is just off.
-- For the Minecraft map: an internet connection the first time you play, and `curl`. `curl` comes with Windows 10 and 11, macOS and most Linux distributions.
-
-## How to play
-
-1. Build it yourself (see [docs/BUILD.md](docs/BUILD.md)): this fork has no download yet, and chasmlol's release zip doesn't have the kaiju.
-2. Double-click `iw4l.exe` and confirm your MW2 folder. It then asks whether you have Skate 3: choose **Yes** and select your `default.xex`, or **No** to play without skating.
-3. To play the Minecraft world, go to **Create Game** and pick the **Minecraft** tab in the map list. The map is called **overworld**.
-
-   You can also double-click `Minecraft World.bat` in the release folder, start the game with `iw4l.exe map minecraft:overworld`, or open the console with the backtick key (`` ` ``, under Esc) and type `map minecraft:overworld`.
+You don't need Minecraft installed. The first time the game starts, it downloads Minecraft 26.3's own files (textures, sounds, world data) straight from Mojang's official servers, the same way the Minecraft launcher does, with the `curl` that comes with Windows 10 and 11. That's about 125 MB, into `iw4l-artifacts/minecraft-26.3`. After that it plays offline. Nothing from Minecraft is included in this repository.
 
 ### Controls on the Minecraft map
 
@@ -89,7 +115,12 @@ You don't need Minecraft installed. The first time the game starts, it downloads
 | Q | | Drop the selected item |
 | Left click (block or empty hand) | Right trigger | Mine or punch |
 | Right click (holding a block) | Left trigger | Place the block |
+| Right click (holding a spawn egg) | Left trigger | Hatch its mob |
+| F5 | | Third person: behind you, in front of you, first person |
+| `` ` `` (under Esc) | | Console (`kaiju godzilla`, `creative on`, ...) |
 | J | Click both sticks in | Skate 3 mode |
+
+In creative mode (`creative on`): double-tap jump to fly, jump rises, C or Ctrl sinks, sprint flies faster, middle click picks the block you look at, and **E** opens the creative inventory.
 
 More about skating in [docs/SKATE.md](docs/SKATE.md).
 
